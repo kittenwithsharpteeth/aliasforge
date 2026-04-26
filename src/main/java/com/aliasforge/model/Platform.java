@@ -2,12 +2,11 @@ package com.aliasforge.model;
 
 /**
  * Plataformas suportadas para verificação de usernames.
+ * Apenas Minecraft está ativo. Custom permite endpoint configurável pelo usuário.
  */
 public enum Platform {
-    DISCORD("discord",   3, 32),
     MINECRAFT("minecraft", 3, 16),
-    ROBLOX("roblox",    3, 20),
-    INSTAGRAM("instagram", 1, 30);
+    CUSTOM("custom",       1, 32);
 
     public final String displayName;
     public final int    minLength;

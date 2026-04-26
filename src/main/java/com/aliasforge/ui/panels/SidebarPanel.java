@@ -15,24 +15,23 @@ public class SidebarPanel extends VBox {
 
     private final AppController controller;
 
-    // Geração — agora como TextField editáveis
     private TextField        quantityField;
     private TextField        minLenField;
     private TextField        maxLenField;
     private ComboBox<String> modeCombo;
     private ComboBox<String> algorithmPlatformCombo;
 
-    // Filtros
     private CheckBox chkStartsWith; private TextField startsWith;
     private CheckBox chkEndsWith;   private TextField endsWith;
     private CheckBox chkContains;   private TextField contains;
 
-    // Caracteres
     private CheckBox chkLetters, chkNumbers, chkUnderscore, chkPeriod;
 
-    // Quick manual verifier
     private TextField        manualInput;
     private ComboBox<String> manualPlatformCombo;
+
+    private Label manualApiIndicator;
+    private Label algorithmApiIndicator;
 
     public SidebarPanel(AppController controller) {
         this.controller = controller;
@@ -46,11 +45,11 @@ public class SidebarPanel extends VBox {
     }
 
     private void buildUI() {
-        VBox quickVerifier = buildQuickVerifier();
-        Separator sep = new Separator();
+        VBox quickVerifier  = buildQuickVerifier();
+        Separator sep       = new Separator();
         sep.getStyleClass().add("af-separator");
-        HBox optionsHeader = buildOptionsHeader();
-        VBox sections = buildSections();
+        VBox optionsHeader  = buildOptionsHeader();  // VBox agora
+        VBox sections       = buildSections();
         VBox.setVgrow(sections, Priority.ALWAYS);
         getChildren().addAll(quickVerifier, sep, optionsHeader, sections);
     }
@@ -62,6 +61,7 @@ public class SidebarPanel extends VBox {
         box.getStyleClass().add("af-section");
         box.setPadding(new Insets(8, 10, 8, 10));
 
+        // Header
         HBox header = new HBox(6);
         header.setAlignment(Pos.CENTER_LEFT);
         Label title = new Label("quick manual verifier");
@@ -69,8 +69,18 @@ public class SidebarPanel extends VBox {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         manualPlatformCombo = buildPlatformCombo("minecraft");
+        manualPlatformCombo.setOnAction(e -> updateManualApiIndicator());
         header.getChildren().addAll(title, spacer, manualPlatformCombo);
 
+        // API badge row
+        HBox apiRow = new HBox(6);
+        apiRow.setAlignment(Pos.CENTER_LEFT);
+        Label apiLbl = new Label("using api:");
+        apiLbl.getStyleClass().add("af-label-muted");
+        manualApiIndicator = buildApiIndicator("minecraft");
+        apiRow.getChildren().addAll(apiLbl, manualApiIndicator);
+
+        // Input
         HBox inputRow = new HBox(6);
         inputRow.setAlignment(Pos.CENTER_LEFT);
         manualInput = new TextField();
@@ -83,6 +93,7 @@ public class SidebarPanel extends VBox {
         manualInput.setOnAction(e -> addManualUsername());
         inputRow.getChildren().addAll(manualInput, addBtn);
 
+        // Actions
         HBox actionBar = new HBox(6);
         actionBar.setAlignment(Pos.CENTER_LEFT);
         Button btnCheck = new Button("check");
@@ -92,11 +103,11 @@ public class SidebarPanel extends VBox {
         btnCheck.setOnAction(e -> addManualUsername());
 
         TableView<ManualRow> miniTable = buildMiniTable();
-        miniTable.setPrefHeight(150);
+        miniTable.setPrefHeight(140);
         btnClear.setOnAction(e -> miniTable.getItems().clear());
 
         actionBar.getChildren().addAll(btnCheck, btnClear);
-        box.getChildren().addAll(header, inputRow, actionBar, miniTable);
+        box.getChildren().addAll(header, apiRow, inputRow, actionBar, miniTable);
         return box;
     }
 
@@ -108,6 +119,13 @@ public class SidebarPanel extends VBox {
                         ? manualPlatformCombo.getValue() : "minecraft");
         controller.addManualTask(username, platform);
         manualInput.clear();
+    }
+
+    private void updateManualApiIndicator() {
+        String platform = manualPlatformCombo.getValue();
+        if (platform == null) return;
+        manualApiIndicator.setText("● " + platform);
+        applyIndicatorStyle(manualApiIndicator, platform);
     }
 
     @SuppressWarnings("unchecked")
@@ -167,22 +185,50 @@ public class SidebarPanel extends VBox {
         tv.getItems().add(0, new ManualRow(r.getUsername(), r.getStatus().getDisplayName()));
     }
 
-    // ── Algorithm Options header ───────────────────────────────────────
+    // ── Algorithm Options header — agora VBox ──────────────────────────
 
-    private HBox buildOptionsHeader() {
+    private VBox buildOptionsHeader() {
+        VBox wrapper = new VBox(0);
+        wrapper.setStyle("-fx-background-color: #222222;");
+
+        // Linha principal
         HBox header = new HBox(6);
         header.getStyleClass().add("af-options-header");
-        header.setPadding(new Insets(6, 10, 6, 10));
+        header.setPadding(new Insets(6, 10, 4, 10));
         header.setAlignment(Pos.CENTER_LEFT);
+
         Label title = new Label("algorithm options");
         title.getStyleClass().add("af-section-title");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
+
         algorithmPlatformCombo = buildPlatformCombo("minecraft");
+        algorithmPlatformCombo.setOnAction(e -> updateAlgorithmApiIndicator());
+
         Label platformLbl = new Label("platform:");
         platformLbl.getStyleClass().add("af-label-muted");
         header.getChildren().addAll(title, spacer, platformLbl, algorithmPlatformCombo);
-        return header;
+
+        // API badge row
+        HBox apiRow = new HBox(6);
+        apiRow.setPadding(new Insets(2, 10, 6, 10));
+        apiRow.setAlignment(Pos.CENTER_LEFT);
+        apiRow.setStyle("-fx-background-color: #222222; " +
+                "-fx-border-color: transparent transparent #333333 transparent; -fx-border-width: 1px;");
+        Label apiLbl = new Label("using api:");
+        apiLbl.getStyleClass().add("af-label-muted");
+        algorithmApiIndicator = buildApiIndicator("minecraft");
+        apiRow.getChildren().addAll(apiLbl, algorithmApiIndicator);
+
+        wrapper.getChildren().addAll(header, apiRow);
+        return wrapper;
+    }
+
+    private void updateAlgorithmApiIndicator() {
+        String platform = algorithmPlatformCombo.getValue();
+        if (platform == null) return;
+        algorithmApiIndicator.setText("● " + platform);
+        applyIndicatorStyle(algorithmApiIndicator, platform);
     }
 
     // ── Seções colapsáveis ─────────────────────────────────────────────
@@ -227,50 +273,37 @@ public class SidebarPanel extends VBox {
         return section;
     }
 
-    // ── Generation content ─────────────────────────────────────────────
+    // ── Generation ─────────────────────────────────────────────────────
 
     private VBox buildGenerationContent() {
         VBox box = new VBox(8);
         box.getStyleClass().add("af-section-content");
         box.setPadding(new Insets(8, 14, 10, 14));
 
-        // Quantity — editável, mínimo 1
-        quantityField = buildNumberField("20", 1, 9999);
-        box.getChildren().add(buildEditableSpinnerRow("quantity", quantityField,
-                () -> stepField(quantityField, 1,  1, 9999),
-                () -> stepField(quantityField, -1, 1, 9999)));
+        quantityField = buildNumberField("20");
+        minLenField   = buildNumberField("3");
+        maxLenField   = buildNumberField("5");
 
-        // Min length
-        minLenField = buildNumberField("3", 1, 16);
-        box.getChildren().add(buildEditableSpinnerRow("length min", minLenField,
-                () -> {
-                    int max = parseField(maxLenField, 5);
-                    stepField(minLenField, 1, 1, max);
-                },
-                () -> stepField(minLenField, -1, 1, 16)));
+        minLenField.focusedProperty().addListener((obs, was, is) -> { if (!is) validateMinMax(); });
+        maxLenField.focusedProperty().addListener((obs, was, is) -> { if (!is) validateMinMax(); });
 
-        // Max length — valida contra min
-        maxLenField = buildNumberField("5", 1, 16);
-        box.getChildren().add(buildEditableSpinnerRow("length max", maxLenField,
-                () -> stepField(maxLenField, 1, 1, 16),
-                () -> {
-                    int min = parseField(minLenField, 1);
-                    stepField(maxLenField, -1, min, 16);
-                }));
+        box.getChildren().addAll(
+                buildSpinnerRow("quantity",   quantityField,
+                        () -> stepField(quantityField, 1,  1, 9999),
+                        () -> stepField(quantityField, -1, 1, 9999)),
+                buildSpinnerRow("length min", minLenField,
+                        () -> { int max = parseField(maxLenField, 5); stepField(minLenField, 1, 1, max); },
+                        () -> stepField(minLenField, -1, 1, 16)),
+                buildSpinnerRow("length max", maxLenField,
+                        () -> stepField(maxLenField, 1, 1, 16),
+                        () -> { int min = parseField(minLenField, 1); stepField(maxLenField, -1, min, 16); })
+        );
 
-        // Cross-validation: quando min muda, ajusta max se necessário
-        minLenField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-            if (!isFocused) validateMinMax();
-        });
-        maxLenField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-            if (!isFocused) validateMinMax();
-        });
-
-        // Mode
         modeCombo = new ComboBox<>();
         modeCombo.getItems().addAll("random", "pronounceable");
         modeCombo.setValue("random");
         modeCombo.getStyleClass().add("af-combo");
+
         HBox modeRow = new HBox(6);
         modeRow.setAlignment(Pos.CENTER_LEFT);
         Label modeLbl = new Label("mode");
@@ -284,27 +317,15 @@ public class SidebarPanel extends VBox {
         return box;
     }
 
-    /** Valida e corrige min/max quando o usuário sai dos campos. */
     private void validateMinMax() {
-        int min = parseField(minLenField, 3);
-        int max = parseField(maxLenField, 5);
-
-        // Clamp aos limites absolutos
-        min = Math.max(1, Math.min(min, 16));
-        max = Math.max(1, Math.min(max, 16));
-
-        // Se min > max, ajusta o campo que está errado para o valor do outro
-        if (min > max) {
-            // O usuário provavelmente editou min — ajusta max para ser igual ao min
-            max = min;
-            maxLenField.setText(String.valueOf(max));
-        }
-
+        int min = Math.max(1, Math.min(parseField(minLenField, 3), 16));
+        int max = Math.max(1, Math.min(parseField(maxLenField, 5), 16));
+        if (min > max) max = min;
         minLenField.setText(String.valueOf(min));
         maxLenField.setText(String.valueOf(max));
     }
 
-    // ── Filters content ────────────────────────────────────────────────
+    // ── Filters ────────────────────────────────────────────────────────
 
     private VBox buildFiltersContent() {
         VBox box = new VBox(8);
@@ -333,7 +354,7 @@ public class SidebarPanel extends VBox {
         return box;
     }
 
-    // ── Characters content ─────────────────────────────────────────────
+    // ── Characters ─────────────────────────────────────────────────────
 
     private VBox buildCharactersContent() {
         VBox box = new VBox(8);
@@ -381,69 +402,71 @@ public class SidebarPanel extends VBox {
         return config;
     }
 
-    // ── Row helpers ────────────────────────────────────────────────────
+    // ── Helpers de UI ──────────────────────────────────────────────────
 
-    /**
-     * Linha com botões < > E um TextField editável no meio.
-     * O usuário pode clicar nos botões OU digitar direto no campo.
-     */
-    private HBox buildEditableSpinnerRow(String label, TextField field,
-                                         Runnable onPlus, Runnable onMinus) {
+    private Label buildApiIndicator(String platform) {
+        Label lbl = new Label("● " + platform);
+        applyIndicatorStyle(lbl, platform);
+        return lbl;
+    }
+
+    private void applyIndicatorStyle(Label lbl, String platform) {
+        String color = switch (platform) {
+            case "minecraft" -> "#4a90d9";
+            case "custom"    -> "#9c27b0";
+            default          -> "#888888";
+        };
+        String bg = switch (platform) {
+            case "minecraft" -> "#1a2a3a";
+            case "custom"    -> "#2a1a3a";
+            default          -> "#2a2a2a";
+        };
+        lbl.setStyle(String.format(
+                "-fx-text-fill: %s; -fx-font-size: 11px;" +
+                        "-fx-background-color: %s;" +
+                        "-fx-background-radius: 3; -fx-padding: 2 8 2 8;", color, bg));
+    }
+
+    private HBox buildSpinnerRow(String label, TextField field,
+                                 Runnable onPlus, Runnable onMinus) {
         HBox row = new HBox(4);
         row.setAlignment(Pos.CENTER_LEFT);
-
         Label lbl = new Label(label);
         lbl.getStyleClass().add("af-label");
         lbl.setPrefWidth(80);
-
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-
         Button minus = new Button("<");
         minus.getStyleClass().add("af-btn-small");
         minus.setOnAction(e -> onMinus.run());
-
         Button plus = new Button(">");
         plus.getStyleClass().add("af-btn-small");
         plus.setOnAction(e -> onPlus.run());
-
         row.getChildren().addAll(lbl, spacer, minus, field, plus);
         return row;
     }
 
-    /** Cria um TextField numérico com largura fixa e validação on-the-fly. */
-    private TextField buildNumberField(String defaultValue, int min, int max) {
+    private TextField buildNumberField(String defaultValue) {
         TextField field = new TextField(defaultValue);
         field.getStyleClass().add("af-input");
         field.setPrefWidth(50);
         field.setAlignment(Pos.CENTER);
-
-        // Só aceita dígitos enquanto digita
         field.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (!newVal.matches("\\d*")) {
-                field.setText(oldVal);
-            }
+            if (!newVal.matches("\\d*")) field.setText(oldVal);
         });
-
         return field;
     }
 
-    /** Incrementa/decrementa o valor de um TextField com clamping. */
     private void stepField(TextField field, int delta, int min, int max) {
-        int current = parseField(field, min);
-        int next    = Math.max(min, Math.min(max, current + delta));
+        int next = Math.max(min, Math.min(max, parseField(field, min) + delta));
         field.setText(String.valueOf(next));
     }
 
-    /** Lê valor inteiro do TextField, retornando defaultVal se inválido. */
     private int parseField(TextField field, int defaultVal) {
         try {
             String text = field.getText().trim();
-            if (text.isEmpty()) return defaultVal;
-            return Integer.parseInt(text);
-        } catch (NumberFormatException e) {
-            return defaultVal;
-        }
+            return text.isEmpty() ? defaultVal : Integer.parseInt(text);
+        } catch (NumberFormatException e) { return defaultVal; }
     }
 
     private HBox buildFilterRow(String label, CheckBox chk, TextField field) {
@@ -473,7 +496,7 @@ public class SidebarPanel extends VBox {
 
     private ComboBox<String> buildPlatformCombo(String defaultValue) {
         ComboBox<String> combo = new ComboBox<>();
-        combo.getItems().addAll("discord", "minecraft", "roblox", "instagram");
+        combo.getItems().addAll("minecraft", "custom");
         combo.setValue(defaultValue);
         combo.getStyleClass().add("af-combo-platform");
         combo.setPrefWidth(110);

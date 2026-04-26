@@ -11,6 +11,7 @@ public class ToolbarPanel extends HBox {
     private Button        btnPause;
     private Button        btnStop;
     private Label         outputLabel;
+    private Label         apiIndicator;
     private ComboBox<String> filterCombo;
     private TextField     searchField;
     private ProgressBar   progressBar;
@@ -25,24 +26,32 @@ public class ToolbarPanel extends HBox {
     }
 
     private void buildUI() {
-        // ── Botões de controle ──────────────────────────────────────────
+        // ── Botões ──────────────────────────────────────────────────────
         btnPlay  = new Button("▶");
         btnPause = new Button("⏸");
         btnStop  = new Button("⏹");
         btnPlay.getStyleClass().addAll("af-btn", "af-btn-play");
         btnPause.getStyleClass().addAll("af-btn", "af-btn-pause");
         btnStop.getStyleClass().addAll("af-btn", "af-btn-stop");
-
-        // Estado inicial: só play habilitado
         btnPause.setDisable(true);
         btnStop.setDisable(true);
 
         HBox controls = new HBox(4, btnPlay, btnPause, btnStop);
         controls.setAlignment(Pos.CENTER_LEFT);
 
-        // ── Label ───────────────────────────────────────────────────────
+        // ── Label output ────────────────────────────────────────────────
         outputLabel = new Label("algorithm output");
         outputLabel.getStyleClass().add("af-output-label");
+
+        // ── API indicator ───────────────────────────────────────────────
+        apiIndicator = new Label("● minecraft");
+        apiIndicator.setStyle(
+                "-fx-text-fill: #4a90d9;" +
+                        "-fx-font-size: 11px;" +
+                        "-fx-background-color: #1a2a3a;" +
+                        "-fx-background-radius: 3;" +
+                        "-fx-padding: 2 8 2 8;");
+        apiIndicator.setTooltip(new Tooltip("Active API for algorithm output"));
 
         // ── Spacer ──────────────────────────────────────────────────────
         Region spacer = new Region();
@@ -72,10 +81,10 @@ public class ToolbarPanel extends HBox {
 
         progressLabel = new Label("0%");
         progressLabel.getStyleClass().add("af-label-muted");
-        progressLabel.setPrefWidth(50);
+        progressLabel.setPrefWidth(60);
 
         getChildren().addAll(
-                controls, outputLabel, spacer,
+                controls, outputLabel, apiIndicator, spacer,
                 filterLabel, filterCombo,
                 searchLabel, searchField,
                 progressBar, progressLabel
@@ -84,18 +93,17 @@ public class ToolbarPanel extends HBox {
 
     // ── API pública ────────────────────────────────────────────────────
 
+    public void setActiveApi(String platformName) {
+        apiIndicator.setText("● " + platformName);
+    }
+
     public void setRunningState(boolean running, boolean paused) {
         btnPlay.setDisable(running && !paused);
         btnPause.setDisable(!running);
         btnStop.setDisable(!running);
-
-        if (!running) {
-            outputLabel.setText("algorithm output");
-        } else if (paused) {
-            outputLabel.setText("paused...");
-        } else {
-            outputLabel.setText("checking...");
-        }
+        if (!running)    outputLabel.setText("algorithm output");
+        else if (paused) outputLabel.setText("paused...");
+        else             outputLabel.setText("checking...");
     }
 
     public void updateProgress(double value, int checked, int total) {
@@ -104,10 +112,10 @@ public class ToolbarPanel extends HBox {
         progressLabel.setText(pct + "%  (" + checked + "/" + total + ")");
     }
 
-    public Button        getBtnPlay()        { return btnPlay; }
-    public Button        getBtnPause()       { return btnPause; }
-    public Button        getBtnStop()        { return btnStop; }
-    public ComboBox<String> getFilterCombo() { return filterCombo; }
-    public TextField     getSearchField()    { return searchField; }
-    public ProgressBar   getProgressBar()    { return progressBar; }
+    public Button           getBtnPlay()        { return btnPlay; }
+    public Button           getBtnPause()       { return btnPause; }
+    public Button           getBtnStop()        { return btnStop; }
+    public ComboBox<String> getFilterCombo()    { return filterCombo; }
+    public TextField        getSearchField()    { return searchField; }
+    public ProgressBar      getProgressBar()    { return progressBar; }
 }

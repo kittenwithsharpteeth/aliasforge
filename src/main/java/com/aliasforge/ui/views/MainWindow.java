@@ -98,17 +98,21 @@ public class MainWindow extends BorderPane {
     // ── Wire controller ────────────────────────────────────────────────
 
     private void wireController() {
-        // Toolbar play/pause/stop
+        // Play
         toolbarPanel.getBtnPlay().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
                 toolbarPanel.setRunningState(true, false);
             } else {
-                controller.start(sidebarPanel.buildConfig());
+                var config = sidebarPanel.buildConfig();
+                // Atualiza indicador de API na toolbar
+                toolbarPanel.setActiveApi(config.getPlatform().displayName);
+                controller.start(config);
                 toolbarPanel.setRunningState(true, false);
             }
         });
 
+        // Pause / Resume
         toolbarPanel.getBtnPause().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
@@ -119,12 +123,13 @@ public class MainWindow extends BorderPane {
             }
         });
 
+        // Stop
         toolbarPanel.getBtnStop().setOnAction(e -> {
             controller.stop();
             toolbarPanel.setRunningState(false, false);
         });
 
-        // Stats callback
+        // Stats
         controller.setOnStatsUpdate(stats -> {
             statusBarPanel.updateStats(
                     stats.available(), stats.taken(),
@@ -133,12 +138,13 @@ public class MainWindow extends BorderPane {
             );
             int total = stats.checked() + stats.remaining();
             if (total > 0) {
-                statusBarPanel.updateProgress((double) stats.checked() / total);
-                toolbarPanel.updateProgress((double) stats.checked() / total, stats.checked(), total);
+                double pct = (double) stats.checked() / total;
+                statusBarPanel.updateProgress(pct);
+                toolbarPanel.updateProgress(pct, stats.checked(), total);
             }
         });
 
-        // Completed callback
+        // Completed
         controller.setOnCompleted(() ->
                 toolbarPanel.setRunningState(false, false)
         );

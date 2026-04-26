@@ -4,6 +4,7 @@ import com.aliasforge.model.Platform;
 
 /**
  * Fábrica de implementações de PlatformApi.
+ * Apenas Minecraft ativo. Custom configurável pelo usuário futuramente.
  */
 public class ApiFactory {
 
@@ -12,9 +13,7 @@ public class ApiFactory {
     public static PlatformApi create(Platform platform) {
         return switch (platform) {
             case MINECRAFT -> new MinecraftApi();
-            case DISCORD   -> new DiscordApi();
-            case ROBLOX    -> new RobloxApi();
-            case INSTAGRAM -> new InstagramApi();
+            case CUSTOM    -> new CustomApi();
         };
     }
 }
