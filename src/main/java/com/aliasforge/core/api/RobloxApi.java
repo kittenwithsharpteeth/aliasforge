@@ -2,77 +2,59 @@ package com.aliasforge.core.api;
 
 import com.aliasforge.model.Platform;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 
 /**
- * Roblox API — lê o JSON da API de busca e verifica username exato.
- * Sobrescreve check() diretamente para ler o body da resposta.
+ * Roblox — usa endpoint de perfil direto.
+ *
+ * GET https://www.roblox.com/users/profile?username=X
+ *   Segue redirects:
+ *   - Se redireciona para /users/{ID}/profile = username existe (taken)
+ *   - Se retorna 200 na página genérica = não existe (available)
+ *   - 404 = disponível
+ *
+ * Lemos o Location do redirect para decidir.
+ * setInstanceFollowRedirects(false) para capturar o redirect manualmente.
  */
 public class RobloxApi extends AbstractPlatformApi {
 
-    private static final String SEARCH_URL =
-            "https://users.roblox.com/v1/users/search?keyword=";
+    private static final String ENDPOINT =
+            "https://www.roblox.com/users/profile?username=";
 
     @Override public Platform getPlatform()           { return Platform.ROBLOX; }
-    @Override public int      getRecommendedDelayMs() { return 600; }
+    @Override public int      getRecommendedDelayMs() { return 700; }
 
-    @Override
-    public CheckResult check(String username) {
-        if (!isValidUsername(username)) return CheckResult.error("invalid username");
-
-        long start = System.currentTimeMillis();
-        try {
-            String url = SEARCH_URL + username + "&limit=10";
-            HttpURLConnection conn = openConnection(url);
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("Origin", "https://www.roblox.com");
-            conn.setRequestProperty("Referer", "https://www.roblox.com/");
-            conn.setInstanceFollowRedirects(true);
-
-            int  code = conn.getResponseCode();
-            long ms   = System.currentTimeMillis() - start;
-
-            if (code == 429) { conn.disconnect(); return CheckResult.rateLimit(); }
-            if (code == 403) { conn.disconnect(); return CheckResult.rateLimit(); }
-            if (code != 200) { conn.disconnect(); return CheckResult.error("http " + code); }
-
-            // Lê o JSON
-            StringBuilder sb = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream()))) {
-                String line;
-                while ((line = br.readLine()) != null) sb.append(line);
-            }
-            conn.disconnect();
-
-            // Procura pelo username exato no JSON
-            // Formato: {"data":[{"id":...,"name":"username",...},...]}
-            String body      = sb.toString();
-            String lowerUser = username.toLowerCase();
-            boolean exactMatch = body.toLowerCase()
-                    .contains("\"name\":\"" + lowerUser + "\"");
-
-            return exactMatch ? CheckResult.taken(ms) : CheckResult.available(ms);
-
-        } catch (java.net.SocketTimeoutException e) {
-            return CheckResult.rateLimit();
-        } catch (Exception e) {
-            LOGGER.error("Error checking Roblox '{}': {}", username, e.getMessage());
-            return CheckResult.error(e.getMessage());
-        }
-    }
-
-    // Necessário pela classe abstrata mas não usado (check() é sobrescrito)
     @Override
     protected String buildUrl(String username) {
-        return SEARCH_URL + username + "&limit=10";
+        return ENDPOINT + username;
     }
 
     @Override
-    protected CheckResult interpretResponse(int httpCode, long ms) {
-        return CheckResult.error("not used");
+    protected HttpURLConnection openConnection(String endpoint) throws Exception {
+        HttpURLConnection conn = super.openConnection(endpoint);
+        conn.setRequestProperty("Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        conn.setRequestProperty("Accept-Language", "en-US,en;q=0.5");
+        conn.setRequestProperty("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0");
+        // NÃO segue redirects — queremos ver o 302 manualmente
+        conn.setInstanceFollowRedirects(false);
+        return conn;
+    }
+
+    @Override
+    protected CheckResult interpretResponse(int code, long ms) {
+        return switch (code) {
+            // 302 redirect para /users/{id}/profile = username existe
+            case 301, 302 -> CheckResult.taken(ms);
+            // 404 = username não existe
+            case 404      -> CheckResult.available(ms);
+            // 200 na página genérica também significa não encontrado
+            case 200      -> CheckResult.available(ms);
+            case 429      -> CheckResult.rateLimit();
+            case 403      -> CheckResult.rateLimit();
+            default       -> CheckResult.error("http " + code);
+        };
     }
 
     @Override

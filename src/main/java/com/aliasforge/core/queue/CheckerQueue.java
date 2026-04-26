@@ -18,9 +18,16 @@ import java.util.function.Consumer;
 /**
  * Fila principal de verificação.
  *
- * Fix: publicação de resultado agora usa um único caminho —
- * elimina duplicatas que ocorriam quando onResult era chamado
- * tanto pelo CHECKING quanto pelo resultado final num mesmo ciclo.
+ * Fluxo de rate limit:
+ * 1. Username recebe rate limit → RATE_LIMIT (origin = "queue")
+ * 2. RateLimitHandler agenda retry (30s / 60s / 120s)
+ * 3. Fila principal continua processando outros usernames normalmente
+ * 4. Após 3 falhas → ERROR (origin = "logs")
+ *
+ * Origin display (via CheckStatus.getOriginDisplay()):
+ *   available/taken/checking → ""
+ *   rate limit               → "queue"
+ *   error                    → "logs"
  */
 public class CheckerQueue {
 
@@ -67,10 +74,21 @@ public class CheckerQueue {
         }
 
         rateLimitHandler = new RateLimitHandler(
-                retryTask -> { if (!stopped.get()) taskQueue.add(retryTask); },
-                exhausted  -> publishResult(new UsernameResult(
-                        exhausted.getUsername(), exhausted.getPlatform(),
-                        CheckStatus.ERROR, 0, exhausted.getOriginDisplay()))
+                // Retry pronto → volta para a fila
+                retryTask -> {
+                    if (!stopped.get()) taskQueue.add(retryTask);
+                },
+                // Esgotou retries → publica como ERROR
+                exhausted -> {
+                    totalRateLimit.decrementAndGet();
+                    totalError.incrementAndGet();
+                    totalChecked.incrementAndGet();
+                    publishResult(new UsernameResult(
+                            exhausted.getUsername(), exhausted.getPlatform(),
+                            CheckStatus.ERROR, 0,
+                            "rate limit exhausted after " + exhausted.getRetryCount() + " retries"));
+                    publishStats();
+                }
         );
 
         int threads = AppConfig.getInstance().getSettings().getParallelThreads();
@@ -125,7 +143,10 @@ public class CheckerQueue {
             while (paused.get() && !stopped.get()) {
                 synchronized (paused) {
                     try { paused.wait(200); }
-                    catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                    catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
                 }
             }
             if (stopped.get()) break;
@@ -158,41 +179,51 @@ public class CheckerQueue {
                     continue;
                 }
 
-                // ── Publica CHECKING apenas uma vez ───────────────────
+                // Publica CHECKING
                 publishResult(new UsernameResult(
                         task.getUsername(), task.getPlatform(),
-                        CheckStatus.CHECKING, 0, task.getOriginDisplay()));
+                        CheckStatus.CHECKING, 0, null));
 
                 currentChecking.incrementAndGet();
-
-                // Faz a verificação (bloqueante — na thread do worker)
                 PlatformApi.CheckResult result = api.check(task.getUsername());
-
                 currentChecking.decrementAndGet();
 
-                // ── Publica resultado final (sobrescreve CHECKING) ─────
                 if (result.isRateLimit()) {
-                    totalRateLimit.incrementAndGet();
+                    // Primeira ocorrência de rate limit para este username
+                    if (task.getRetryCount() == 0) {
+                        totalRateLimit.incrementAndGet();
+                    }
+
+                    // Delega ao handler — vai recolocar na fila ou virar error
                     rateLimitHandler.handleRateLimit(task);
+
+                    // Publica RATE_LIMIT para atualizar a tabela
                     publishResult(new UsernameResult(
                             task.getUsername(), task.getPlatform(),
-                            CheckStatus.RATE_LIMIT, 0, "queue"));
+                            CheckStatus.RATE_LIMIT, 0, null));
+
                 } else {
+                    // Resultado final — se era retry, remove do contador de rate limit
+                    if (task.getRetryCount() > 0) {
+                        totalRateLimit.decrementAndGet();
+                    }
+
                     totalChecked.incrementAndGet();
                     switch (result.status()) {
                         case AVAILABLE -> totalAvailable.incrementAndGet();
                         case TAKEN     -> totalTaken.incrementAndGet();
                         default        -> totalError.incrementAndGet();
                     }
+
                     publishResult(new UsernameResult(
                             task.getUsername(), task.getPlatform(),
                             result.status(), result.responseTimeMs(),
-                            task.getOriginDisplay()));
+                            result.errorDetail()));
                 }
 
                 publishStats();
 
-                // Delay: maior entre config do usuário e mínimo da plataforma
+                // Delay por plataforma (usa o maior entre config e mínimo da plataforma)
                 int userDelay     = AppConfig.getInstance().getSettings().getDelayBetweenRequestsMs();
                 int platformDelay = api.getRecommendedDelayMs();
                 Thread.sleep(Math.max(userDelay, platformDelay));

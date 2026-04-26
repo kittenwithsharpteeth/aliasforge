@@ -16,9 +16,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
@@ -34,16 +33,14 @@ public class HistoryRepository {
 
     private static HistoryRepository instance;
 
-    private final Path                    filePath;
-    private final Gson                    gson;
-    private final List<UsernameResult>    entries;
-
-    // ── Singleton ──────────────────────────────────────────────────────
+    private final Path                 filePath;
+    private final Gson                 gson;
+    private final List<UsernameResult> entries;
 
     private HistoryRepository() {
-        Path dir   = Paths.get(System.getProperty("user.home"), DIR_NAME);
+        Path dir      = Paths.get(System.getProperty("user.home"), DIR_NAME);
         this.filePath = dir.resolve(FILE_NAME);
-        this.gson  = new GsonBuilder()
+        this.gson     = new GsonBuilder()
                 .setPrettyPrinting()
                 .registerTypeAdapter(LocalDateTime.class, new LocalDateTimeAdapter())
                 .create();
@@ -58,13 +55,11 @@ public class HistoryRepository {
     // ── API pública ────────────────────────────────────────────────────
 
     public synchronized void add(UsernameResult result) {
-        // Não salva status intermediários
         if (result.getStatus() == CheckStatus.CHECKING ||
                 result.getStatus() == CheckStatus.PENDING) return;
 
-        entries.add(0, result); // mais recente primeiro
+        entries.add(0, result);
         save();
-        LOGGER.debug("History: added {} ({})", result.getUsername(), result.getStatus());
     }
 
     public List<UsernameResult> getAll() {
@@ -143,14 +138,14 @@ public class HistoryRepository {
         }
     }
 
-    // ── DTO para serialização JSON ─────────────────────────────────────
+    // ── DTO para JSON ──────────────────────────────────────────────────
 
     private static class HistoryEntry {
         String  username;
         String  platform;
         String  status;
         long    responseTimeMs;
-        String  origin;
+        String  errorDetail;
         String  checkedAt;
         boolean favorited;
 
@@ -160,7 +155,7 @@ public class HistoryRepository {
             e.platform      = r.getPlatform().name();
             e.status        = r.getStatus().name();
             e.responseTimeMs= r.getResponseTimeMs();
-            e.origin        = r.getOrigin();
+            e.errorDetail   = r.getErrorDetail();
             e.checkedAt     = r.getCheckedAtFormatted();
             e.favorited     = r.isFavorited();
             return e;
@@ -172,10 +167,10 @@ public class HistoryRepository {
                     Platform.valueOf(platform),
                     CheckStatus.valueOf(status),
                     responseTimeMs,
-                    origin,
+                    errorDetail,
                     checkedAt != null
                             ? LocalDateTime.parse(checkedAt,
-                            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
                             : LocalDateTime.now(),
                     favorited
             );

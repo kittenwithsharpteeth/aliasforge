@@ -32,4 +32,19 @@ public enum CheckStatus {
             case PENDING    -> "#aaaaaa";
         };
     }
+
+    /**
+     * Retorna o texto da coluna "origin" para cada status.
+     * available/taken = vazio
+     * rate limit = "queue"
+     * error = "logs"
+     * checking/pending = vazio
+     */
+    public String getOriginDisplay() {
+        return switch (this) {
+            case RATE_LIMIT -> "queue";
+            case ERROR      -> "logs";
+            default         -> "";
+        };
+    }
 }

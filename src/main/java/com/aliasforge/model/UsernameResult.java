@@ -5,7 +5,6 @@ import java.time.format.DateTimeFormatter;
 
 /**
  * Representa o resultado de uma verificação de username.
- * Imutável após criação — status é atualizado via withStatus().
  */
 public class UsernameResult {
 
@@ -16,47 +15,43 @@ public class UsernameResult {
     private final Platform      platform;
     private final CheckStatus   status;
     private final long          responseTimeMs;
-    private final String        origin;       // "queue", "logs", "manual"
+    private final String        errorDetail;   // detalhe do erro para os logs futuros
     private final LocalDateTime checkedAt;
     private final boolean       favorited;
 
-    // Construtor principal
     public UsernameResult(String username, Platform platform, CheckStatus status,
-                          long responseTimeMs, String origin) {
+                          long responseTimeMs, String errorDetail) {
         this.username       = username;
         this.platform       = platform;
         this.status         = status;
         this.responseTimeMs = responseTimeMs;
-        this.origin         = origin;
+        this.errorDetail    = errorDetail;
         this.checkedAt      = LocalDateTime.now();
         this.favorited      = false;
     }
 
-    // Construtor completo (usado ao carregar do disco)
     public UsernameResult(String username, Platform platform, CheckStatus status,
-                          long responseTimeMs, String origin,
+                          long responseTimeMs, String errorDetail,
                           LocalDateTime checkedAt, boolean favorited) {
         this.username       = username;
         this.platform       = platform;
         this.status         = status;
         this.responseTimeMs = responseTimeMs;
-        this.origin         = origin;
+        this.errorDetail    = errorDetail;
         this.checkedAt      = checkedAt;
         this.favorited      = favorited;
     }
 
-    // ── Builders imutáveis ─────────────────────────────────────────────
+    // ── Builders ───────────────────────────────────────────────────────
 
-    /** Retorna uma cópia com novo status. */
     public UsernameResult withStatus(CheckStatus newStatus, long responseTimeMs) {
         return new UsernameResult(username, platform, newStatus,
-                responseTimeMs, origin, checkedAt, favorited);
+                responseTimeMs, errorDetail, checkedAt, favorited);
     }
 
-    /** Retorna uma cópia com favorited alternado. */
     public UsernameResult withFavorited(boolean favorited) {
         return new UsernameResult(username, platform, status,
-                responseTimeMs, origin, checkedAt, favorited);
+                responseTimeMs, errorDetail, checkedAt, favorited);
     }
 
     // ── Getters ────────────────────────────────────────────────────────
@@ -65,9 +60,20 @@ public class UsernameResult {
     public Platform      getPlatform()       { return platform; }
     public CheckStatus   getStatus()         { return status; }
     public long          getResponseTimeMs() { return responseTimeMs; }
-    public String        getOrigin()         { return origin; }
-    public LocalDateTime getCheckedAt()      { return checkedAt; }
     public boolean       isFavorited()       { return favorited; }
+    public LocalDateTime getCheckedAt()      { return checkedAt; }
+    public String        getErrorDetail()    { return errorDetail; }
+
+    /**
+     * Coluna "origin" na tabela:
+     * - available / taken  → vazio
+     * - rate limit         → "queue"
+     * - error              → "logs"
+     * - checking / pending → vazio
+     */
+    public String getOrigin() {
+        return status.getOriginDisplay();
+    }
 
     public String getCheckedAtFormatted() {
         return checkedAt != null ? checkedAt.format(FORMATTER) : "";
