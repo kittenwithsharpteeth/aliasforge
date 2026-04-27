@@ -29,9 +29,7 @@ public class SidebarPanel extends VBox {
 
     private TextField        manualInput;
     private ComboBox<String> manualPlatformCombo;
-
-    private Label manualApiIndicator;
-    private Label algorithmApiIndicator;
+    private TableView<ManualRow> manualTable;
 
     public SidebarPanel(AppController controller) {
         this.controller = controller;
@@ -45,11 +43,11 @@ public class SidebarPanel extends VBox {
     }
 
     private void buildUI() {
-        VBox quickVerifier  = buildQuickVerifier();
-        Separator sep       = new Separator();
+        VBox quickVerifier = buildQuickVerifier();
+        Separator sep = new Separator();
         sep.getStyleClass().add("af-separator");
-        VBox optionsHeader  = buildOptionsHeader();  // VBox agora
-        VBox sections       = buildSections();
+        VBox optionsHeader = buildOptionsHeader();
+        VBox sections = buildSections();
         VBox.setVgrow(sections, Priority.ALWAYS);
         getChildren().addAll(quickVerifier, sep, optionsHeader, sections);
     }
@@ -61,7 +59,7 @@ public class SidebarPanel extends VBox {
         box.getStyleClass().add("af-section");
         box.setPadding(new Insets(8, 10, 8, 10));
 
-        // Header
+        // Header com platform combo
         HBox header = new HBox(6);
         header.setAlignment(Pos.CENTER_LEFT);
         Label title = new Label("quick manual verifier");
@@ -69,18 +67,9 @@ public class SidebarPanel extends VBox {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         manualPlatformCombo = buildPlatformCombo("minecraft");
-        manualPlatformCombo.setOnAction(e -> updateManualApiIndicator());
         header.getChildren().addAll(title, spacer, manualPlatformCombo);
 
-        // API badge row
-        HBox apiRow = new HBox(6);
-        apiRow.setAlignment(Pos.CENTER_LEFT);
-        Label apiLbl = new Label("using api:");
-        apiLbl.getStyleClass().add("af-label-muted");
-        manualApiIndicator = buildApiIndicator("minecraft");
-        apiRow.getChildren().addAll(apiLbl, manualApiIndicator);
-
-        // Input
+        // Input row
         HBox inputRow = new HBox(6);
         inputRow.setAlignment(Pos.CENTER_LEFT);
         manualInput = new TextField();
@@ -93,7 +82,7 @@ public class SidebarPanel extends VBox {
         manualInput.setOnAction(e -> addManualUsername());
         inputRow.getChildren().addAll(manualInput, addBtn);
 
-        // Actions
+        // Action bar
         HBox actionBar = new HBox(6);
         actionBar.setAlignment(Pos.CENTER_LEFT);
         Button btnCheck = new Button("check");
@@ -101,13 +90,14 @@ public class SidebarPanel extends VBox {
         btnCheck.getStyleClass().add("af-btn");
         btnClear.getStyleClass().add("af-btn");
         btnCheck.setOnAction(e -> addManualUsername());
-
-        TableView<ManualRow> miniTable = buildMiniTable();
-        miniTable.setPrefHeight(140);
-        btnClear.setOnAction(e -> miniTable.getItems().clear());
-
         actionBar.getChildren().addAll(btnCheck, btnClear);
-        box.getChildren().addAll(header, apiRow, inputRow, actionBar, miniTable);
+
+        // Mini table com coluna de platform
+        manualTable = buildMiniTable();
+        manualTable.setPrefHeight(150);
+        btnClear.setOnAction(e -> manualTable.getItems().clear());
+
+        box.getChildren().addAll(header, inputRow, actionBar, manualTable);
         return box;
     }
 
@@ -117,15 +107,11 @@ public class SidebarPanel extends VBox {
         Platform platform = Platform.fromString(
                 manualPlatformCombo.getValue() != null
                         ? manualPlatformCombo.getValue() : "minecraft");
+
+        // Adiciona à mini tabela como "checking" imediatamente
+        updateOrAddMiniRow(username, "checking", platform.displayName);
         controller.addManualTask(username, platform);
         manualInput.clear();
-    }
-
-    private void updateManualApiIndicator() {
-        String platform = manualPlatformCombo.getValue();
-        if (platform == null) return;
-        manualApiIndicator.setText("● " + platform);
-        applyIndicatorStyle(manualApiIndicator, platform);
     }
 
     @SuppressWarnings("unchecked")
@@ -135,37 +121,58 @@ public class SidebarPanel extends VBox {
         tv.setEditable(true);
         tv.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         tv.setFixedCellSize(24);
-        tv.setPlaceholder(new Label("") {{
-            setStyle("-fx-text-fill: transparent;");
+        tv.setPlaceholder(new Label("enter a username above") {{
+            setStyle("-fx-text-fill: #555555; -fx-font-size: 11px;");
         }});
 
+        // Checkbox
         TableColumn<ManualRow, Boolean> colCheck = new TableColumn<>("");
         colCheck.setCellValueFactory(c -> c.getValue().selectedProperty());
         colCheck.setCellFactory(CheckBoxTableCell.forTableColumn(colCheck));
-        colCheck.setMaxWidth(30); colCheck.setMinWidth(30); colCheck.setResizable(false);
+        colCheck.setMaxWidth(28); colCheck.setMinWidth(28); colCheck.setResizable(false);
 
+        // Username
         TableColumn<ManualRow, String> colName = new TableColumn<>("username");
         colName.setCellValueFactory(c -> c.getValue().nameProperty());
 
+        // Status
         TableColumn<ManualRow, String> colStatus = new TableColumn<>("status");
         colStatus.setCellValueFactory(c -> c.getValue().statusProperty());
         colStatus.setCellFactory(col -> new MiniStatusCell());
-        colStatus.setPrefWidth(80);
+        colStatus.setPrefWidth(75);
 
-        tv.getColumns().addAll(colCheck, colName, colStatus);
+        // Platform / API usada
+        TableColumn<ManualRow, String> colPlatform = new TableColumn<>("api");
+        colPlatform.setCellValueFactory(c -> c.getValue().platformProperty());
+        colPlatform.setCellFactory(col -> new MiniPlatformCell());
+        colPlatform.setPrefWidth(65);
+        colPlatform.setResizable(false);
 
+        tv.getColumns().addAll(colCheck, colName, colStatus, colPlatform);
+
+        // Observa resultados — atualiza apenas os de origem manual
         controller.getResults().addListener(
                 (javafx.collections.ListChangeListener<com.aliasforge.model.UsernameResult>) change -> {
                     while (change.next()) {
                         if (change.wasAdded()) {
                             for (var r : change.getAddedSubList()) {
-                                if ("manual".equals(r.getOrigin())) updateOrAddMiniRow(tv, r);
+                                if ("manual".equals(r.getOrigin()) || isManualEntry(r.getUsername())) {
+                                    updateOrAddMiniRow(
+                                            r.getUsername(),
+                                            r.getStatus().getDisplayName(),
+                                            r.getPlatform().displayName);
+                                }
                             }
                         }
                         if (change.wasReplaced()) {
                             for (int i = change.getFrom(); i < change.getTo(); i++) {
                                 var r = controller.getResults().get(i);
-                                if ("manual".equals(r.getOrigin())) updateOrAddMiniRow(tv, r);
+                                if ("manual".equals(r.getOrigin()) || isManualEntry(r.getUsername())) {
+                                    updateOrAddMiniRow(
+                                            r.getUsername(),
+                                            r.getStatus().getDisplayName(),
+                                            r.getPlatform().displayName);
+                                }
                             }
                         }
                     }
@@ -174,61 +181,45 @@ public class SidebarPanel extends VBox {
         return tv;
     }
 
-    private void updateOrAddMiniRow(TableView<ManualRow> tv,
-                                    com.aliasforge.model.UsernameResult r) {
-        for (ManualRow row : tv.getItems()) {
-            if (row.nameProperty().get().equalsIgnoreCase(r.getUsername())) {
-                row.statusProperty().set(r.getStatus().getDisplayName());
+    /** Verifica se o username já está na mini tabela manual. */
+    private boolean isManualEntry(String username) {
+        return manualTable.getItems().stream()
+                .anyMatch(r -> r.nameProperty().get().equalsIgnoreCase(username));
+    }
+
+    private void updateOrAddMiniRow(String username, String status, String platform) {
+        for (ManualRow row : manualTable.getItems()) {
+            if (row.nameProperty().get().equalsIgnoreCase(username)) {
+                row.statusProperty().set(status);
+                row.platformProperty().set(platform);
                 return;
             }
         }
-        tv.getItems().add(0, new ManualRow(r.getUsername(), r.getStatus().getDisplayName()));
+        manualTable.getItems().add(0, new ManualRow(username, status, platform));
     }
 
-    // ── Algorithm Options header — agora VBox ──────────────────────────
+    // ── Algorithm Options header ───────────────────────────────────────
 
     private VBox buildOptionsHeader() {
         VBox wrapper = new VBox(0);
         wrapper.setStyle("-fx-background-color: #222222;");
 
-        // Linha principal
         HBox header = new HBox(6);
         header.getStyleClass().add("af-options-header");
-        header.setPadding(new Insets(6, 10, 4, 10));
+        header.setPadding(new Insets(6, 10, 6, 10));
         header.setAlignment(Pos.CENTER_LEFT);
 
         Label title = new Label("algorithm options");
         title.getStyleClass().add("af-section-title");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-
         algorithmPlatformCombo = buildPlatformCombo("minecraft");
-        algorithmPlatformCombo.setOnAction(e -> updateAlgorithmApiIndicator());
-
         Label platformLbl = new Label("platform:");
         platformLbl.getStyleClass().add("af-label-muted");
         header.getChildren().addAll(title, spacer, platformLbl, algorithmPlatformCombo);
 
-        // API badge row
-        HBox apiRow = new HBox(6);
-        apiRow.setPadding(new Insets(2, 10, 6, 10));
-        apiRow.setAlignment(Pos.CENTER_LEFT);
-        apiRow.setStyle("-fx-background-color: #222222; " +
-                "-fx-border-color: transparent transparent #333333 transparent; -fx-border-width: 1px;");
-        Label apiLbl = new Label("using api:");
-        apiLbl.getStyleClass().add("af-label-muted");
-        algorithmApiIndicator = buildApiIndicator("minecraft");
-        apiRow.getChildren().addAll(apiLbl, algorithmApiIndicator);
-
-        wrapper.getChildren().addAll(header, apiRow);
+        wrapper.getChildren().add(header);
         return wrapper;
-    }
-
-    private void updateAlgorithmApiIndicator() {
-        String platform = algorithmPlatformCombo.getValue();
-        if (platform == null) return;
-        algorithmApiIndicator.setText("● " + platform);
-        applyIndicatorStyle(algorithmApiIndicator, platform);
     }
 
     // ── Seções colapsáveis ─────────────────────────────────────────────
@@ -289,7 +280,7 @@ public class SidebarPanel extends VBox {
 
         box.getChildren().addAll(
                 buildSpinnerRow("quantity",   quantityField,
-                        () -> stepField(quantityField, 1,  1, 9999),
+                        () -> stepField(quantityField, 1, 1, 9999),
                         () -> stepField(quantityField, -1, 1, 9999)),
                 buildSpinnerRow("length min", minLenField,
                         () -> { int max = parseField(maxLenField, 5); stepField(minLenField, 1, 1, max); },
@@ -402,30 +393,7 @@ public class SidebarPanel extends VBox {
         return config;
     }
 
-    // ── Helpers de UI ──────────────────────────────────────────────────
-
-    private Label buildApiIndicator(String platform) {
-        Label lbl = new Label("● " + platform);
-        applyIndicatorStyle(lbl, platform);
-        return lbl;
-    }
-
-    private void applyIndicatorStyle(Label lbl, String platform) {
-        String color = switch (platform) {
-            case "minecraft" -> "#4a90d9";
-            case "custom"    -> "#9c27b0";
-            default          -> "#888888";
-        };
-        String bg = switch (platform) {
-            case "minecraft" -> "#1a2a3a";
-            case "custom"    -> "#2a1a3a";
-            default          -> "#2a2a2a";
-        };
-        lbl.setStyle(String.format(
-                "-fx-text-fill: %s; -fx-font-size: 11px;" +
-                        "-fx-background-color: %s;" +
-                        "-fx-background-radius: 3; -fx-padding: 2 8 2 8;", color, bg));
-    }
+    // ── Row helpers ────────────────────────────────────────────────────
 
     private HBox buildSpinnerRow(String label, TextField field,
                                  Runnable onPlus, Runnable onMinus) {
@@ -503,21 +471,27 @@ public class SidebarPanel extends VBox {
         return combo;
     }
 
-    // ── ManualRow ──────────────────────────────────────────────────────
+    // ── ManualRow model ────────────────────────────────────────────────
 
     public static class ManualRow {
-        private final SimpleBooleanProperty selected = new SimpleBooleanProperty(false);
-        private final SimpleStringProperty  name     = new SimpleStringProperty();
-        private final SimpleStringProperty  status   = new SimpleStringProperty();
+        private final SimpleBooleanProperty selected  = new SimpleBooleanProperty(false);
+        private final SimpleStringProperty  name      = new SimpleStringProperty();
+        private final SimpleStringProperty  status    = new SimpleStringProperty();
+        private final SimpleStringProperty  platform  = new SimpleStringProperty();
 
-        public ManualRow(String name, String status) {
-            this.name.set(name); this.status.set(status);
+        public ManualRow(String name, String status, String platform) {
+            this.name.set(name);
+            this.status.set(status);
+            this.platform.set(platform);
         }
 
-        public SimpleBooleanProperty selectedProperty() { return selected; }
-        public SimpleStringProperty  nameProperty()     { return name; }
-        public SimpleStringProperty  statusProperty()   { return status; }
+        public SimpleBooleanProperty selectedProperty()  { return selected; }
+        public SimpleStringProperty  nameProperty()      { return name; }
+        public SimpleStringProperty  statusProperty()    { return status; }
+        public SimpleStringProperty  platformProperty()  { return platform; }
     }
+
+    // ── Mini Cells ─────────────────────────────────────────────────────
 
     private static class MiniStatusCell extends TableCell<ManualRow, String> {
         @Override
@@ -534,6 +508,21 @@ public class SidebarPanel extends VBox {
                 default           -> "#aaaaaa";
             };
             setStyle("-fx-text-fill: " + color + "; -fx-font-size: 11px;");
+        }
+    }
+
+    private static class MiniPlatformCell extends TableCell<ManualRow, String> {
+        @Override
+        protected void updateItem(String platform, boolean empty) {
+            super.updateItem(platform, empty);
+            if (empty || platform == null) { setText(null); setStyle(""); return; }
+            setText(platform);
+            String color = switch (platform) {
+                case "minecraft" -> "#4a90d9";
+                case "custom"    -> "#9c27b0";
+                default          -> "#888888";
+            };
+            setStyle("-fx-text-fill: " + color + "; -fx-font-size: 10px;");
         }
     }
 }

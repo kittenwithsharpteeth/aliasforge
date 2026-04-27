@@ -15,8 +15,8 @@ import java.util.stream.Collectors;
 
 public class ResultsPanel extends VBox {
 
-    private final AppController      controller;
-    private TableView<ResultRow>     table;
+    private final AppController  controller;
+    private TableView<ResultRow> table;
 
     public ResultsPanel(AppController controller) {
         this.controller = controller;
@@ -79,10 +79,7 @@ public class ResultsPanel extends VBox {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Label currentApi = new Label("current api ⓘ");
-        currentApi.getStyleClass().add("af-label-muted");
-
-        bar.getChildren().addAll(btnAll, btnCopy, btnRecheck, btnFavorite, btnClear, spacer, currentApi);
+        bar.getChildren().addAll(btnAll, btnCopy, btnRecheck, btnFavorite, btnClear, spacer);
         return bar;
     }
 
@@ -98,50 +95,58 @@ public class ResultsPanel extends VBox {
             setStyle("-fx-text-fill: #555555; -fx-font-size: 13px;");
         }});
 
+        // Checkbox
         TableColumn<ResultRow, Boolean> colCheck = new TableColumn<>("");
         colCheck.setCellValueFactory(c -> c.getValue().selectedProperty());
         colCheck.setCellFactory(CheckBoxTableCell.forTableColumn(colCheck));
         colCheck.setMaxWidth(36); colCheck.setMinWidth(36); colCheck.setResizable(false);
 
+        // Username
         TableColumn<ResultRow, String> colName = new TableColumn<>("username");
         colName.setCellValueFactory(c -> c.getValue().nameProperty());
-        colName.setPrefWidth(180);
+        colName.setPrefWidth(160);
 
+        // Status
         TableColumn<ResultRow, String> colStatus = new TableColumn<>("status");
         colStatus.setCellValueFactory(c -> c.getValue().statusProperty());
         colStatus.setCellFactory(col -> new StatusCell());
-        colStatus.setPrefWidth(100);
+        colStatus.setPrefWidth(90);
 
+        // Platform — mostra qual API verificou este username
+        TableColumn<ResultRow, String> colPlatform = new TableColumn<>("api");
+        colPlatform.setCellValueFactory(c -> c.getValue().platformProperty());
+        colPlatform.setCellFactory(col -> new PlatformCell());
+        colPlatform.setPrefWidth(90);
+
+        // Tempo
         TableColumn<ResultRow, String> colTime = new TableColumn<>("ms");
         colTime.setCellValueFactory(c -> c.getValue().timeProperty());
-        colTime.setPrefWidth(70);
+        colTime.setPrefWidth(60);
 
+        // Origem
         TableColumn<ResultRow, String> colOrigin = new TableColumn<>("origin");
         colOrigin.setCellValueFactory(c -> c.getValue().originProperty());
-        colOrigin.setPrefWidth(60);
+        colOrigin.setPrefWidth(50);
 
+        // Favorito
         TableColumn<ResultRow, Boolean> colFav = new TableColumn<>("★");
         colFav.setCellValueFactory(c -> c.getValue().favoritedProperty());
         colFav.setCellFactory(col -> new FavoriteCell(controller));
         colFav.setMaxWidth(40); colFav.setMinWidth(40); colFav.setResizable(false);
 
-        tv.getColumns().addAll(colCheck, colName, colStatus, colTime, colOrigin, colFav);
+        tv.getColumns().addAll(colCheck, colName, colStatus, colPlatform, colTime, colOrigin, colFav);
         return tv;
     }
 
-    // ── Bind ao controller — SEM listener duplicado ────────────────────
+    // ── Bind ───────────────────────────────────────────────────────────
 
     private void bindData() {
         controller.getResults().addListener(
                 (javafx.collections.ListChangeListener<UsernameResult>) change -> {
                     while (change.next()) {
-                        // Adicionado novo resultado
                         if (change.wasAdded()) {
-                            for (UsernameResult r : change.getAddedSubList()) {
-                                updateOrAdd(r);
-                            }
+                            for (UsernameResult r : change.getAddedSubList()) updateOrAdd(r);
                         }
-                        // Resultado existente foi substituído (ex: CHECKING → AVAILABLE)
                         if (change.wasReplaced()) {
                             for (int i = change.getFrom(); i < change.getTo(); i++) {
                                 updateOrAdd(controller.getResults().get(i));
@@ -151,22 +156,15 @@ public class ResultsPanel extends VBox {
                 });
     }
 
-    /**
-     * Atualiza a linha existente se o username já estiver na tabela,
-     * ou adiciona uma nova linha se não existir.
-     * Garante que nunca há duplicatas.
-     */
     private void updateOrAdd(UsernameResult result) {
         for (int i = 0; i < table.getItems().size(); i++) {
             ResultRow row = table.getItems().get(i);
             if (row.getUsername().equalsIgnoreCase(result.getUsername())) {
                 row.update(result);
-                // Força refresh da célula sem criar nova linha
                 table.refresh();
                 return;
             }
         }
-        // Não existe ainda — adiciona
         table.getItems().add(new ResultRow(result));
         int last = table.getItems().size() - 1;
         if (last >= 0) table.scrollTo(last);
@@ -179,29 +177,32 @@ public class ResultsPanel extends VBox {
         private final BooleanProperty favorited = new SimpleBooleanProperty(false);
         private final StringProperty  name      = new SimpleStringProperty();
         private final StringProperty  status    = new SimpleStringProperty();
+        private final StringProperty  platform  = new SimpleStringProperty();
         private final StringProperty  time      = new SimpleStringProperty();
         private final StringProperty  origin    = new SimpleStringProperty();
-        private com.aliasforge.model.Platform platform;
+        private com.aliasforge.model.Platform platformEnum;
 
         public ResultRow(UsernameResult r) { update(r); }
 
         public void update(UsernameResult r) {
             name.set(r.getUsername());
             status.set(r.getStatus().getDisplayName());
+            platform.set(r.getPlatform().displayName);
             time.set(r.getResponseTimeDisplay());
             origin.set(r.getOrigin() != null ? r.getOrigin() : "");
             favorited.set(r.isFavorited());
-            this.platform = r.getPlatform();
+            this.platformEnum = r.getPlatform();
         }
 
         public BooleanProperty selectedProperty()  { return selected; }
         public BooleanProperty favoritedProperty() { return favorited; }
         public StringProperty  nameProperty()      { return name; }
         public StringProperty  statusProperty()    { return status; }
+        public StringProperty  platformProperty()  { return platform; }
         public StringProperty  timeProperty()      { return time; }
         public StringProperty  originProperty()    { return origin; }
         public String          getUsername()       { return name.get(); }
-        public com.aliasforge.model.Platform getPlatform() { return platform; }
+        public com.aliasforge.model.Platform getPlatform() { return platformEnum; }
     }
 
     // ── Cells ──────────────────────────────────────────────────────────
@@ -221,6 +222,21 @@ public class ResultsPanel extends VBox {
                 default           -> "#cccccc";
             };
             setStyle("-fx-text-fill: " + color + "; -fx-font-weight: bold;");
+        }
+    }
+
+    private static class PlatformCell extends TableCell<ResultRow, String> {
+        @Override
+        protected void updateItem(String platform, boolean empty) {
+            super.updateItem(platform, empty);
+            if (empty || platform == null) { setText(null); setStyle(""); return; }
+            setText(platform);
+            String color = switch (platform) {
+                case "minecraft" -> "#4a90d9";
+                case "custom"    -> "#9c27b0";
+                default          -> "#888888";
+            };
+            setStyle("-fx-text-fill: " + color + "; -fx-font-size: 11px;");
         }
     }
 

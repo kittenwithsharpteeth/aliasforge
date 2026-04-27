@@ -104,10 +104,7 @@ public class MainWindow extends BorderPane {
                 controller.resume();
                 toolbarPanel.setRunningState(true, false);
             } else {
-                var config = sidebarPanel.buildConfig();
-                // Atualiza indicador de API na toolbar
-                toolbarPanel.setActiveApi(config.getPlatform().displayName);
-                controller.start(config);
+                controller.start(sidebarPanel.buildConfig());
                 toolbarPanel.setRunningState(true, false);
             }
         });
