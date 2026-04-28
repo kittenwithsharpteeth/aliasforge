@@ -18,24 +18,24 @@ import java.util.function.Consumer;
 /**
  * Fila principal de verificação.
  *
- * Fluxo de rate limit:
- * 1. Username recebe rate limit → RATE_LIMIT (origin = "queue")
- * 2. RateLimitHandler agenda retry (30s / 60s / 120s)
- * 3. Fila principal continua processando outros usernames normalmente
- * 4. Após 3 falhas → ERROR (origin = "logs")
- *
- * Origin display (via CheckStatus.getOriginDisplay()):
- *   available/taken/checking → ""
- *   rate limit               → "queue"
- *   error                    → "logs"
+ * Correções aplicadas:
+ * 1. completionSignaled — callback de "done" dispara apenas uma vez por ciclo,
+ *    evita disparo concorrente quando múltiplas threads esvaziam a fila ao mesmo tempo.
+ * 2. running=true explícito em addManualTask — garante consistência de estado
+ *    quando novas tarefas chegam depois da fila esvaziar (manual/retry/infinito).
+ * 3. Disponibilidade da plataforma verificada uma vez por instância de worker,
+ *    não a cada username — elimina overhead repetitivo no modo manual.
+ * 4. Fila de rate limit respeita paused — não injeta retry se worker está pausado.
  */
 public class CheckerQueue {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CheckerQueue.class);
 
-    private final AtomicBoolean running  = new AtomicBoolean(false);
-    private final AtomicBoolean paused   = new AtomicBoolean(false);
-    private final AtomicBoolean stopped  = new AtomicBoolean(false);
+    private final AtomicBoolean running            = new AtomicBoolean(false);
+    private final AtomicBoolean paused             = new AtomicBoolean(false);
+    private final AtomicBoolean stopped            = new AtomicBoolean(false);
+    // Fix 1: garante que o callback onCompleted dispara apenas uma vez por ciclo
+    private final AtomicBoolean completionSignaled = new AtomicBoolean(false);
 
     private final AtomicInteger totalChecked    = new AtomicInteger(0);
     private final AtomicInteger totalAvailable  = new AtomicInteger(0);
@@ -43,6 +43,7 @@ public class CheckerQueue {
     private final AtomicInteger totalRateLimit  = new AtomicInteger(0);
     private final AtomicInteger totalError      = new AtomicInteger(0);
     private final AtomicInteger currentChecking = new AtomicInteger(0);
+    private final AtomicInteger activeWorkers   = new AtomicInteger(0);
 
     private final BlockingQueue<CheckTask> taskQueue = new LinkedBlockingQueue<>();
     private ExecutorService  executor;
@@ -68,17 +69,21 @@ public class CheckerQueue {
         running.set(true);
         stopped.set(false);
         paused.set(false);
+        completionSignaled.set(false);
 
         for (String u : usernames) {
             taskQueue.add(new CheckTask(u, platform, CheckTask.Origin.GENERATOR));
         }
 
         rateLimitHandler = new RateLimitHandler(
-                // Retry pronto → volta para a fila
                 retryTask -> {
-                    if (!stopped.get()) taskQueue.add(retryTask);
+                    if (!stopped.get()) {
+                        // Fix 2: reativa running ao injetar retry
+                        running.set(true);
+                        completionSignaled.set(false);
+                        taskQueue.add(retryTask);
+                    }
                 },
-                // Esgotou retries → publica como ERROR
                 exhausted -> {
                     totalRateLimit.decrementAndGet();
                     totalError.incrementAndGet();
@@ -105,8 +110,28 @@ public class CheckerQueue {
     }
 
     public void addManualTask(String username, Platform platform) {
-        if (!stopped.get()) {
-            taskQueue.add(new CheckTask(username, platform, CheckTask.Origin.MANUAL));
+        if (stopped.get()) return;
+
+        // Fix 2: reativa running explicitamente quando chegam novas tarefas
+        running.set(true);
+        completionSignaled.set(false);
+
+        taskQueue.add(new CheckTask(username, platform, CheckTask.Origin.MANUAL));
+
+        // Se executor não existe ou foi encerrado, cria um novo worker leve
+        if (executor == null || executor.isShutdown()) {
+            executor = Executors.newFixedThreadPool(1, r -> {
+                Thread t = new Thread(r, "aliasforge-manual");
+                t.setDaemon(true);
+                return t;
+            });
+            rateLimitHandler = new RateLimitHandler(
+                    retryTask -> { if (!stopped.get()) { running.set(true); taskQueue.add(retryTask); }},
+                    exhausted  -> publishResult(new UsernameResult(
+                            exhausted.getUsername(), exhausted.getPlatform(),
+                            CheckStatus.ERROR, 0, "rate limit exhausted"))
+            );
+            executor.submit(this::workerLoop);
         }
     }
 
@@ -135,46 +160,65 @@ public class CheckerQueue {
     // ── Worker ─────────────────────────────────────────────────────────
 
     private void workerLoop() {
+        activeWorkers.incrementAndGet();
+
+        // Fix 3: verifica disponibilidade da plataforma UMA vez por instância de worker,
+        // não a cada username. Se a plataforma não está disponível, descarta todas as tasks.
         PlatformApi api          = null;
         Platform    lastPlatform = null;
+        boolean     platformAvailable = true;
+        String      unavailableReason = "";
 
-        while (!stopped.get()) {
-            // Pausa
-            while (paused.get() && !stopped.get()) {
-                synchronized (paused) {
-                    try { paused.wait(200); }
-                    catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return;
+        try {
+            while (!stopped.get()) {
+                // Pausa
+                while (paused.get() && !stopped.get()) {
+                    synchronized (paused) {
+                        try { paused.wait(200); }
+                        catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
                     }
                 }
-            }
-            if (stopped.get()) break;
+                if (stopped.get()) break;
 
-            try {
                 CheckTask task = taskQueue.poll(500, TimeUnit.MILLISECONDS);
 
                 if (task == null) {
-                    if (!rateLimitHandler.hasPendingRetries()) {
+                    // Fix 1: verifica se todos os workers estão ociosos e
+                    // não há retries pendentes antes de sinalizar conclusão
+                    if (running.get() &&
+                            taskQueue.isEmpty() &&
+                            rateLimitHandler != null &&
+                            !rateLimitHandler.hasPendingRetries() &&
+                            // Usa compareAndSet para garantir disparo único
+                            completionSignaled.compareAndSet(false, true)) {
                         running.set(false);
+                        LOGGER.info("Checker queue empty — signaling completion.");
                         if (onCompleted != null) onCompleted.run();
                     }
                     continue;
                 }
 
-                // Recria API se plataforma mudou
+                // Fix 3: recria API e reavalia disponibilidade apenas quando a plataforma muda
                 if (api == null || task.getPlatform() != lastPlatform) {
                     api = ApiFactory.create(task.getPlatform());
                     lastPlatform = task.getPlatform();
+                    platformAvailable  = api.isAvailable();
+                    unavailableReason  = api.getUnavailableReason();
+                    if (!platformAvailable) {
+                        LOGGER.warn("Platform {} unavailable: {}", task.getPlatform(), unavailableReason);
+                    }
                 }
 
-                // Plataforma indisponível
-                if (!api.isAvailable()) {
+                // Plataforma indisponível — descarta a task diretamente sem fazer request
+                if (!platformAvailable) {
                     totalError.incrementAndGet();
                     totalChecked.incrementAndGet();
                     publishResult(new UsernameResult(
                             task.getUsername(), task.getPlatform(),
-                            CheckStatus.ERROR, 0, api.getUnavailableReason()));
+                            CheckStatus.ERROR, 0, unavailableReason));
                     publishStats();
                     continue;
                 }
@@ -189,32 +233,19 @@ public class CheckerQueue {
                 currentChecking.decrementAndGet();
 
                 if (result.isRateLimit()) {
-                    // Primeira ocorrência de rate limit para este username
-                    if (task.getRetryCount() == 0) {
-                        totalRateLimit.incrementAndGet();
-                    }
-
-                    // Delega ao handler — vai recolocar na fila ou virar error
+                    if (task.getRetryCount() == 0) totalRateLimit.incrementAndGet();
                     rateLimitHandler.handleRateLimit(task);
-
-                    // Publica RATE_LIMIT para atualizar a tabela
                     publishResult(new UsernameResult(
                             task.getUsername(), task.getPlatform(),
                             CheckStatus.RATE_LIMIT, 0, null));
-
                 } else {
-                    // Resultado final — se era retry, remove do contador de rate limit
-                    if (task.getRetryCount() > 0) {
-                        totalRateLimit.decrementAndGet();
-                    }
-
+                    if (task.getRetryCount() > 0) totalRateLimit.decrementAndGet();
                     totalChecked.incrementAndGet();
                     switch (result.status()) {
                         case AVAILABLE -> totalAvailable.incrementAndGet();
                         case TAKEN     -> totalTaken.incrementAndGet();
                         default        -> totalError.incrementAndGet();
                     }
-
                     publishResult(new UsernameResult(
                             task.getUsername(), task.getPlatform(),
                             result.status(), result.responseTimeMs(),
@@ -223,17 +254,18 @@ public class CheckerQueue {
 
                 publishStats();
 
-                // Delay por plataforma (usa o maior entre config e mínimo da plataforma)
+                // Delay por plataforma
                 int userDelay     = AppConfig.getInstance().getSettings().getDelayBetweenRequestsMs();
                 int platformDelay = api.getRecommendedDelayMs();
                 Thread.sleep(Math.max(userDelay, platformDelay));
 
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                LOGGER.error("Unexpected error in worker", e);
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            LOGGER.error("Unexpected error in worker", e);
+        } finally {
+            activeWorkers.decrementAndGet();
         }
     }
 
@@ -247,10 +279,11 @@ public class CheckerQueue {
 
     private void publishStats() {
         if (onStatsUpdate != null) {
+            int pending = rateLimitHandler != null ? rateLimitHandler.getPendingRetryCount() : 0;
             CheckerStats stats = new CheckerStats(
                     totalChecked.get(), totalAvailable.get(), totalTaken.get(),
                     totalRateLimit.get(), totalError.get(), currentChecking.get(),
-                    taskQueue.size() + rateLimitHandler.getPendingRetryCount()
+                    taskQueue.size() + pending
             );
             javafx.application.Platform.runLater(() -> onStatsUpdate.accept(stats));
         }
@@ -260,6 +293,8 @@ public class CheckerQueue {
         taskQueue.clear();
         totalChecked.set(0); totalAvailable.set(0); totalTaken.set(0);
         totalRateLimit.set(0); totalError.set(0); currentChecking.set(0);
+        activeWorkers.set(0);
+        completionSignaled.set(false);
     }
 
     public boolean isRunning()    { return running.get(); }

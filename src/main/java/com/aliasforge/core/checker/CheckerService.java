@@ -17,11 +17,15 @@ import java.util.function.Consumer;
 
 /**
  * Serviço principal que orquestra NameGenerator + CheckerQueue.
- * Suporta modo infinito: gera batches de 50 continuamente até o usuário parar.
+ *
+ * Correções no modo infinito:
+ * - infinitePaused: impede injeção de novos batches enquanto pausado
+ * - pause/resume/stop respeitam o estado infinito corretamente
+ * - watcher verifica infinitePaused antes de injetar
  */
 public class CheckerService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(CheckerService.class);
+    private static final Logger LOGGER         = LoggerFactory.getLogger(CheckerService.class);
     private static final int    INFINITE_BATCH = 50;
 
     private final NameGenerator generator;
@@ -30,10 +34,13 @@ public class CheckerService {
     private final Consumer<CheckerQueue.CheckerStats> onStats;
     private final Runnable                            onCompleted;
 
-    private CheckerQueue              currentQueue;
-    private ScheduledExecutorService  infiniteScheduler;
-    private final AtomicBoolean       infiniteRunning = new AtomicBoolean(false);
-    private GeneratorConfig           infiniteConfig;
+    private CheckerQueue             currentQueue;
+    private ScheduledExecutorService infiniteScheduler;
+
+    // Estado do modo infinito
+    private final AtomicBoolean infiniteRunning = new AtomicBoolean(false);
+    private final AtomicBoolean infinitePaused  = new AtomicBoolean(false);
+    private GeneratorConfig     infiniteConfig;
 
     public CheckerService(
             Consumer<UsernameResult>            onResult,
@@ -65,67 +72,141 @@ public class CheckerService {
         }
         LOGGER.info("Starting finite checker: {} usernames on {}",
                 usernames.size(), config.getPlatform());
-        currentQueue = new CheckerQueue(onResult, onStats, onCompleted);
+        currentQueue = new CheckerQueue(onResult, onStats, () -> {
+            if (onCompleted != null) onCompleted.run();
+        });
         currentQueue.start(usernames, config.getPlatform());
     }
 
-    /**
-     * Modo infinito: gera um batch, verifica, quando a fila esvazia gera outro.
-     * Usa um scheduler para monitorar a fila e injetar novos batches.
-     */
     private void startInfinite(GeneratorConfig config) {
-        infiniteConfig  = config;
+        infiniteConfig = config;
         infiniteRunning.set(true);
+        infinitePaused.set(false);
 
         LOGGER.info("Starting infinite checker on {}", config.getPlatform());
 
-        // Cria a queue e injeta primeiro batch
+        // Queue com callback de ciclo concluído
         currentQueue = new CheckerQueue(onResult, onStats, () -> {
-            // Callback de "batch concluído" — injeta próximo se ainda infinito
-            if (infiniteRunning.get()) {
+            // Só injeta próximo batch se não pausado e ainda rodando
+            if (infiniteRunning.get() && !infinitePaused.get()) {
+                LOGGER.debug("Infinite: batch complete, injecting next batch");
                 injectNextBatch();
-            } else {
-                if (onCompleted != null) onCompleted.run();
             }
         });
 
-        injectFirstBatch();
+        // Injeta primeiro batch e inicia a queue
+        List<String> firstBatch = generateBatch();
+        if (!firstBatch.isEmpty()) {
+            currentQueue.start(firstBatch, infiniteConfig.getPlatform());
+        }
 
-        // Scheduler de segurança: verifica a cada 2s se a fila travou
+        // Watcher de segurança: detecta se a queue travou sem disparar o callback
         infiniteScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "aliasforge-infinite-watcher");
             t.setDaemon(true);
             return t;
         });
+
         infiniteScheduler.scheduleAtFixedRate(() -> {
-            if (infiniteRunning.get() && currentQueue != null
-                    && !currentQueue.isRunning() && !currentQueue.isPaused()) {
-                LOGGER.debug("Infinite watcher: queue idle, injecting next batch");
-                injectNextBatch();
-            }
+            // Não injeta se pausado, parado ou já rodando normalmente
+            if (!infiniteRunning.get() || infinitePaused.get()) return;
+            if (currentQueue == null) return;
+            if (currentQueue.isRunning() || currentQueue.isPaused()) return;
+
+            // Queue ociosa sem ter sido sinalizada — injeta próximo batch
+            LOGGER.debug("Infinite watcher: queue idle, injecting next batch");
+            injectNextBatch();
         }, 3, 3, TimeUnit.SECONDS);
     }
 
-    private void injectFirstBatch() {
-        List<String> batch = generateBatch();
-        if (batch.isEmpty()) return;
-        currentQueue.start(batch, infiniteConfig.getPlatform());
-    }
-
     private void injectNextBatch() {
-        if (!infiniteRunning.get() || currentQueue == null) return;
+        if (!infiniteRunning.get() || infinitePaused.get() || currentQueue == null) return;
         List<String> batch = generateBatch();
         if (batch.isEmpty()) return;
-        LOGGER.info("Infinite mode: injecting {} more usernames", batch.size());
+        LOGGER.info("Infinite mode: injecting {} usernames", batch.size());
         for (String u : batch) {
             currentQueue.addManualTask(u, infiniteConfig.getPlatform());
         }
     }
 
     private List<String> generateBatch() {
-        // Cria config temporário com quantity = INFINITE_BATCH
-        GeneratorConfig batchConfig = cloneWithQuantity(infiniteConfig, INFINITE_BATCH);
-        return generator.generate(batchConfig);
+        GeneratorConfig c = cloneWithQuantity(infiniteConfig, INFINITE_BATCH);
+        return generator.generate(c);
+    }
+
+    // ── Pause / Resume / Stop ──────────────────────────────────────────
+
+    public void pause() {
+        if (infiniteRunning.get()) {
+            // Modo infinito: marca infinitePaused para bloquear injeção de novos batches
+            infinitePaused.set(true);
+            LOGGER.info("Infinite mode paused — no new batches will be injected.");
+        }
+        if (currentQueue != null) currentQueue.pause();
+    }
+
+    public void resume() {
+        if (infiniteRunning.get()) {
+            infinitePaused.set(false);
+            LOGGER.info("Infinite mode resumed.");
+            // Se a queue esvaziou enquanto estava pausado, injeta novo batch
+            if (currentQueue != null && !currentQueue.isRunning()) {
+                injectNextBatch();
+            }
+        }
+        if (currentQueue != null) currentQueue.resume();
+    }
+
+    public void stop() {
+        stopAndDiscard();
+    }
+
+    // ── Manual ─────────────────────────────────────────────────────────
+
+    public void startManual(List<String> usernames, Platform platform) {
+        stopAndDiscard();
+        LOGGER.info("Starting manual check: {} usernames on {}", usernames.size(), platform);
+        currentQueue = new CheckerQueue(onResult, onStats, onCompleted);
+        currentQueue.start(usernames, platform);
+    }
+
+    public void addManual(String username, Platform platform) {
+        if (currentQueue == null || (!currentQueue.isRunning() && !currentQueue.isPaused())) {
+            currentQueue = new CheckerQueue(onResult, onStats, null);
+        }
+        currentQueue.addManualTask(username, platform);
+    }
+
+    // ── Estado ─────────────────────────────────────────────────────────
+
+    public boolean isRunning() {
+        return currentQueue != null && currentQueue.isRunning();
+    }
+
+    public boolean isPaused() {
+        return currentQueue != null && currentQueue.isPaused();
+    }
+
+    public boolean isInfiniteMode() {
+        return infiniteRunning.get();
+    }
+
+    // ── Interno ────────────────────────────────────────────────────────
+
+    private void stopAndDiscard() {
+        // Para o modo infinito completamente
+        infiniteRunning.set(false);
+        infinitePaused.set(false);
+        infiniteConfig = null;
+
+        if (infiniteScheduler != null) {
+            infiniteScheduler.shutdownNow();
+            infiniteScheduler = null;
+        }
+        if (currentQueue != null) {
+            currentQueue.stop();
+            currentQueue = null;
+        }
     }
 
     private GeneratorConfig cloneWithQuantity(GeneratorConfig src, int quantity) {
@@ -144,55 +225,5 @@ public class CheckerService {
         c.setCustomChars(src.getCustomChars());
         c.setPlatform(src.getPlatform());
         return c;
-    }
-
-    public void startManual(List<String> usernames, Platform platform) {
-        stopAndDiscard();
-        LOGGER.info("Starting manual check: {} usernames on {}", usernames.size(), platform);
-        currentQueue = new CheckerQueue(onResult, onStats, onCompleted);
-        currentQueue.start(usernames, platform);
-    }
-
-    public void addManual(String username, Platform platform) {
-        if (currentQueue == null || !currentQueue.isRunning()) {
-            // Cria uma fila leve só para o manual
-            currentQueue = new CheckerQueue(onResult, onStats, null);
-        }
-        currentQueue.addManualTask(username, platform);
-    }
-
-    public void pause() {
-        if (currentQueue != null) currentQueue.pause();
-    }
-
-    public void resume() {
-        if (currentQueue != null) currentQueue.resume();
-    }
-
-    public void stop() {
-        stopAndDiscard();
-    }
-
-    public boolean isRunning() {
-        return currentQueue != null && currentQueue.isRunning();
-    }
-
-    public boolean isPaused() {
-        return currentQueue != null && currentQueue.isPaused();
-    }
-
-    // ── Interno ────────────────────────────────────────────────────────
-
-    private void stopAndDiscard() {
-        infiniteRunning.set(false);
-        if (infiniteScheduler != null) {
-            infiniteScheduler.shutdownNow();
-            infiniteScheduler = null;
-        }
-        if (currentQueue != null) {
-            currentQueue.stop();
-            currentQueue = null;
-        }
-        infiniteConfig = null;
     }
 }
