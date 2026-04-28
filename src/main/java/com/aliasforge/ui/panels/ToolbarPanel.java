@@ -5,6 +5,8 @@ import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
+import java.util.function.BiConsumer;
+
 public class ToolbarPanel extends HBox {
 
     private Button           btnPlay;
@@ -15,6 +17,9 @@ public class ToolbarPanel extends HBox {
     private TextField        searchField;
     private ProgressBar      progressBar;
     private Label            progressLabel;
+
+    // Callback chamado quando filtro ou busca mudam
+    private BiConsumer<String, String> onFilterChanged;
 
     public ToolbarPanel() {
         getStyleClass().add("toolbar-panel");
@@ -43,21 +48,26 @@ public class ToolbarPanel extends HBox {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
+        // ── Filter ──────────────────────────────────────────────────────
         Label filterLabel = new Label("filter");
         filterLabel.getStyleClass().add("af-label-muted");
         filterCombo = new ComboBox<>();
-        filterCombo.getItems().addAll("all", "available", "taken", "rate limit", "error");
+        filterCombo.getItems().addAll("all", "available", "taken", "rate limit", "error", "checking");
         filterCombo.setValue("all");
         filterCombo.getStyleClass().add("af-combo");
         filterCombo.setPrefWidth(110);
+        filterCombo.setOnAction(e -> notifyFilterChanged());
 
+        // ── Search ──────────────────────────────────────────────────────
         Label searchLabel = new Label("search");
         searchLabel.getStyleClass().add("af-label-muted");
         searchField = new TextField();
         searchField.setPromptText("username...");
         searchField.getStyleClass().add("af-search");
         searchField.setPrefWidth(130);
+        searchField.textProperty().addListener((obs, o, n) -> notifyFilterChanged());
 
+        // ── Progress ────────────────────────────────────────────────────
         progressBar = new ProgressBar(0);
         progressBar.getStyleClass().add("af-progress");
         progressBar.setPrefWidth(140);
@@ -74,6 +84,22 @@ public class ToolbarPanel extends HBox {
         );
     }
 
+    private void notifyFilterChanged() {
+        if (onFilterChanged != null) {
+            onFilterChanged.accept(
+                    filterCombo.getValue(),
+                    searchField.getText().trim().toLowerCase()
+            );
+        }
+    }
+
+    // ── API pública ────────────────────────────────────────────────────
+
+    /** Registra callback chamado quando filtro ou busca mudam. */
+    public void setOnFilterChanged(BiConsumer<String, String> cb) {
+        this.onFilterChanged = cb;
+    }
+
     public void setRunningState(boolean running, boolean paused) {
         btnPlay.setDisable(running && !paused);
         btnPause.setDisable(!running);
@@ -87,6 +113,11 @@ public class ToolbarPanel extends HBox {
         progressBar.setProgress(value);
         int pct = (int) (value * 100);
         progressLabel.setText(pct + "%  (" + checked + "/" + total + ")");
+    }
+
+    public void resetProgress() {
+        progressBar.setProgress(0);
+        progressLabel.setText("0%");
     }
 
     public Button           getBtnPlay()     { return btnPlay; }

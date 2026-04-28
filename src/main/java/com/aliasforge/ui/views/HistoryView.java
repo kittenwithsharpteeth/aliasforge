@@ -1,6 +1,5 @@
 package com.aliasforge.ui.views;
 
-import com.aliasforge.model.CheckStatus;
 import com.aliasforge.model.Platform;
 import com.aliasforge.model.UsernameResult;
 import com.aliasforge.ui.AppController;
@@ -12,7 +11,13 @@ import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.*;
+import javafx.stage.FileChooser;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class HistoryView extends VBox {
@@ -57,7 +62,7 @@ public class HistoryView extends VBox {
         Label platformLbl = new Label("platform");
         platformLbl.getStyleClass().add("af-label-muted");
         platformCombo = new ComboBox<>();
-        platformCombo.getItems().addAll("all", "discord", "minecraft", "roblox", "instagram");
+        platformCombo.getItems().addAll("all", "minecraft", "custom");
         platformCombo.setValue("all");
         platformCombo.getStyleClass().add("af-combo");
         platformCombo.setPrefWidth(110);
@@ -76,10 +81,13 @@ public class HistoryView extends VBox {
 
         Button btnFavSelected = new Button("★ favorite selected");
         Button btnCopyAvail   = new Button("copy available");
+        Button btnExport      = new Button("export csv");
         Button btnClear       = new Button("clear history");
+
         btnFavSelected.getStyleClass().add("af-btn");
         btnFavSelected.setStyle("-fx-text-fill: #ffc107;");
         btnCopyAvail.getStyleClass().add("af-btn");
+        btnExport.getStyleClass().add("af-btn");
         btnClear.getStyleClass().add("af-btn");
 
         btnFavSelected.setOnAction(e -> table.getItems().stream()
@@ -98,6 +106,8 @@ public class HistoryView extends VBox {
             }
         });
 
+        btnExport.setOnAction(e -> exportCsv());
+
         btnClear.setOnAction(e -> {
             Alert alert = new Alert(Alert.AlertType.CONFIRMATION,
                     "Clear all history? This cannot be undone.", ButtonType.YES, ButtonType.NO);
@@ -108,7 +118,7 @@ public class HistoryView extends VBox {
         });
 
         bar.getChildren().addAll(filterLbl, filterCombo, platformLbl, platformCombo,
-                searchLbl, searchField, spacer, btnFavSelected, btnCopyAvail, btnClear);
+                searchLbl, searchField, spacer, btnFavSelected, btnCopyAvail, btnExport, btnClear);
         return bar;
     }
 
@@ -136,16 +146,16 @@ public class HistoryView extends VBox {
 
         TableColumn<HistoryRow, String> colName = new TableColumn<>("username");
         colName.setCellValueFactory(c -> c.getValue().nameProperty());
-        colName.setPrefWidth(160);
+        colName.setPrefWidth(150);
 
         TableColumn<HistoryRow, String> colStatus = new TableColumn<>("status");
         colStatus.setCellValueFactory(c -> c.getValue().statusProperty());
         colStatus.setCellFactory(col -> new StatusCell());
-        colStatus.setPrefWidth(100);
+        colStatus.setPrefWidth(90);
 
-        TableColumn<HistoryRow, String> colPlatform = new TableColumn<>("platform");
+        TableColumn<HistoryRow, String> colPlatform = new TableColumn<>("api");
         colPlatform.setCellValueFactory(c -> c.getValue().platformProperty());
-        colPlatform.setPrefWidth(100);
+        colPlatform.setPrefWidth(80);
 
         TableColumn<HistoryRow, String> colDate = new TableColumn<>("checked at");
         colDate.setCellValueFactory(c -> c.getValue().dateProperty());
@@ -194,7 +204,7 @@ public class HistoryView extends VBox {
         String platformFilter = platformCombo.getValue();
         String search         = searchField.getText().toLowerCase().trim();
 
-        var filtered = controller.getHistory().stream()
+        List<HistoryRow> filtered = controller.getHistory().stream()
                 .filter(r -> "all".equals(statusFilter) ||
                         r.getStatus().getDisplayName().equals(statusFilter))
                 .filter(r -> "all".equals(platformFilter) ||
@@ -208,7 +218,7 @@ public class HistoryView extends VBox {
         updateStats(filtered);
     }
 
-    private void updateStats(java.util.List<HistoryRow> rows) {
+    private void updateStats(List<HistoryRow> rows) {
         long avail  = rows.stream().filter(r -> "available".equals(r.statusProperty().get())).count();
         long taken  = rows.stream().filter(r -> "taken".equals(r.statusProperty().get())).count();
         long errors = rows.stream().filter(r ->
@@ -218,6 +228,50 @@ public class HistoryView extends VBox {
         availableLabel.setText("available: " + avail);
         takenLabel.setText("taken: " + taken);
         errorLabel.setText("error / rate limit: " + errors);
+    }
+
+    // ── Export CSV ─────────────────────────────────────────────────────
+
+    private void exportCsv() {
+        List<HistoryRow> rows = table.getItems();
+        if (rows.isEmpty()) {
+            showAlert("Export CSV", "No history to export.");
+            return;
+        }
+
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Export History as CSV");
+        chooser.setInitialFileName("aliasforge_history.csv");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
+
+        File file = chooser.showSaveDialog(getScene() != null ? getScene().getWindow() : null);
+        if (file == null) return;
+
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
+            bw.write("username,status,platform,checked_at,ms");
+            bw.newLine();
+            for (HistoryRow r : rows) {
+                bw.write(String.join(",",
+                        r.getUsername(),
+                        r.statusProperty().get(),
+                        r.platformProperty().get(),
+                        r.dateProperty().get(),
+                        r.timeProperty().get()
+                ));
+                bw.newLine();
+            }
+            showAlert("Export Complete", "History exported to:\n" + file.getAbsolutePath());
+        } catch (IOException e) {
+            showAlert("Export Error", "Failed to export: " + e.getMessage());
+        }
+    }
+
+    private void showAlert(String title, String msg) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION, msg, ButtonType.OK);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.showAndWait();
     }
 
     // ── HistoryRow ─────────────────────────────────────────────────────
@@ -278,7 +332,8 @@ public class HistoryView extends VBox {
 
         public FavoriteCell(AppController controller) {
             this.controller = controller;
-            btn.setStyle("-fx-background-color: transparent; -fx-text-fill: #555555; -fx-font-size: 14px; -fx-cursor: hand; -fx-padding: 0 4px;");
+            btn.setStyle("-fx-background-color: transparent; -fx-text-fill: #555555;" +
+                    "-fx-font-size: 14px; -fx-cursor: hand; -fx-padding: 0 4px;");
             btn.setOnAction(e -> {
                 HistoryRow row = getTableView().getItems().get(getIndex());
                 controller.toggleFavorite(row.getUsername(), row.getPlatform());
@@ -291,7 +346,9 @@ public class HistoryView extends VBox {
             if (empty) { setGraphic(null); return; }
             boolean f = fav != null && fav;
             btn.setText(f ? "★" : "☆");
-            btn.setStyle("-fx-background-color: transparent; -fx-text-fill: " + (f ? "#ffc107" : "#555555") + "; -fx-font-size: 14px; -fx-cursor: hand; -fx-padding: 0 4px;");
+            btn.setStyle("-fx-background-color: transparent; -fx-text-fill: " +
+                    (f ? "#ffc107" : "#555555") +
+                    "; -fx-font-size: 14px; -fx-cursor: hand; -fx-padding: 0 4px;");
             setGraphic(btn);
         }
     }

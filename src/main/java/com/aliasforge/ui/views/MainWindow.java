@@ -98,18 +98,20 @@ public class MainWindow extends BorderPane {
     // ── Wire controller ────────────────────────────────────────────────
 
     private void wireController() {
-        // Play
+        // ── Play ────────────────────────────────────────────────────────
         toolbarPanel.getBtnPlay().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
                 toolbarPanel.setRunningState(true, false);
             } else {
-                controller.start(sidebarPanel.buildConfig());
+                var config = sidebarPanel.buildConfig();
+                controller.start(config);
                 toolbarPanel.setRunningState(true, false);
+                toolbarPanel.resetProgress();
             }
         });
 
-        // Pause / Resume
+        // ── Pause / Resume ──────────────────────────────────────────────
         toolbarPanel.getBtnPause().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
@@ -120,13 +122,18 @@ public class MainWindow extends BorderPane {
             }
         });
 
-        // Stop
+        // ── Stop ────────────────────────────────────────────────────────
         toolbarPanel.getBtnStop().setOnAction(e -> {
             controller.stop();
             toolbarPanel.setRunningState(false, false);
         });
 
-        // Stats
+        // ── Filter + Search → ResultsPanel ──────────────────────────────
+        toolbarPanel.setOnFilterChanged((filter, search) ->
+                resultsPanel.applyFilter(filter, search)
+        );
+
+        // ── Stats ───────────────────────────────────────────────────────
         controller.setOnStatsUpdate(stats -> {
             statusBarPanel.updateStats(
                     stats.available(), stats.taken(),
@@ -141,7 +148,7 @@ public class MainWindow extends BorderPane {
             }
         });
 
-        // Completed
+        // ── Completed ───────────────────────────────────────────────────
         controller.setOnCompleted(() ->
                 toolbarPanel.setRunningState(false, false)
         );

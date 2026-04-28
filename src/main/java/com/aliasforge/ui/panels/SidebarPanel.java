@@ -16,6 +16,8 @@ public class SidebarPanel extends VBox {
     private final AppController controller;
 
     private TextField        quantityField;
+    private boolean          isInfinite = false;
+    private Label            infiniteLabel;   // mostra "∞" quando infinito
     private TextField        minLenField;
     private TextField        maxLenField;
     private ComboBox<String> modeCombo;
@@ -59,7 +61,6 @@ public class SidebarPanel extends VBox {
         box.getStyleClass().add("af-section");
         box.setPadding(new Insets(8, 10, 8, 10));
 
-        // Header com platform combo
         HBox header = new HBox(6);
         header.setAlignment(Pos.CENTER_LEFT);
         Label title = new Label("quick manual verifier");
@@ -69,7 +70,6 @@ public class SidebarPanel extends VBox {
         manualPlatformCombo = buildPlatformCombo("minecraft");
         header.getChildren().addAll(title, spacer, manualPlatformCombo);
 
-        // Input row
         HBox inputRow = new HBox(6);
         inputRow.setAlignment(Pos.CENTER_LEFT);
         manualInput = new TextField();
@@ -82,7 +82,6 @@ public class SidebarPanel extends VBox {
         manualInput.setOnAction(e -> addManualUsername());
         inputRow.getChildren().addAll(manualInput, addBtn);
 
-        // Action bar
         HBox actionBar = new HBox(6);
         actionBar.setAlignment(Pos.CENTER_LEFT);
         Button btnCheck = new Button("check");
@@ -90,13 +89,12 @@ public class SidebarPanel extends VBox {
         btnCheck.getStyleClass().add("af-btn");
         btnClear.getStyleClass().add("af-btn");
         btnCheck.setOnAction(e -> addManualUsername());
-        actionBar.getChildren().addAll(btnCheck, btnClear);
 
-        // Mini table com coluna de platform
         manualTable = buildMiniTable();
         manualTable.setPrefHeight(150);
         btnClear.setOnAction(e -> manualTable.getItems().clear());
 
+        actionBar.getChildren().addAll(btnCheck, btnClear);
         box.getChildren().addAll(header, inputRow, actionBar, manualTable);
         return box;
     }
@@ -107,8 +105,6 @@ public class SidebarPanel extends VBox {
         Platform platform = Platform.fromString(
                 manualPlatformCombo.getValue() != null
                         ? manualPlatformCombo.getValue() : "minecraft");
-
-        // Adiciona à mini tabela como "checking" imediatamente
         updateOrAddMiniRow(username, "checking", platform.displayName);
         controller.addManualTask(username, platform);
         manualInput.clear();
@@ -125,23 +121,19 @@ public class SidebarPanel extends VBox {
             setStyle("-fx-text-fill: #555555; -fx-font-size: 11px;");
         }});
 
-        // Checkbox
         TableColumn<ManualRow, Boolean> colCheck = new TableColumn<>("");
         colCheck.setCellValueFactory(c -> c.getValue().selectedProperty());
         colCheck.setCellFactory(CheckBoxTableCell.forTableColumn(colCheck));
         colCheck.setMaxWidth(28); colCheck.setMinWidth(28); colCheck.setResizable(false);
 
-        // Username
         TableColumn<ManualRow, String> colName = new TableColumn<>("username");
         colName.setCellValueFactory(c -> c.getValue().nameProperty());
 
-        // Status
         TableColumn<ManualRow, String> colStatus = new TableColumn<>("status");
         colStatus.setCellValueFactory(c -> c.getValue().statusProperty());
         colStatus.setCellFactory(col -> new MiniStatusCell());
         colStatus.setPrefWidth(75);
 
-        // Platform / API usada
         TableColumn<ManualRow, String> colPlatform = new TableColumn<>("api");
         colPlatform.setCellValueFactory(c -> c.getValue().platformProperty());
         colPlatform.setCellFactory(col -> new MiniPlatformCell());
@@ -150,15 +142,13 @@ public class SidebarPanel extends VBox {
 
         tv.getColumns().addAll(colCheck, colName, colStatus, colPlatform);
 
-        // Observa resultados — atualiza apenas os de origem manual
         controller.getResults().addListener(
                 (javafx.collections.ListChangeListener<com.aliasforge.model.UsernameResult>) change -> {
                     while (change.next()) {
                         if (change.wasAdded()) {
                             for (var r : change.getAddedSubList()) {
-                                if ("manual".equals(r.getOrigin()) || isManualEntry(r.getUsername())) {
-                                    updateOrAddMiniRow(
-                                            r.getUsername(),
+                                if (isManualEntry(r.getUsername())) {
+                                    updateOrAddMiniRow(r.getUsername(),
                                             r.getStatus().getDisplayName(),
                                             r.getPlatform().displayName);
                                 }
@@ -167,9 +157,8 @@ public class SidebarPanel extends VBox {
                         if (change.wasReplaced()) {
                             for (int i = change.getFrom(); i < change.getTo(); i++) {
                                 var r = controller.getResults().get(i);
-                                if ("manual".equals(r.getOrigin()) || isManualEntry(r.getUsername())) {
-                                    updateOrAddMiniRow(
-                                            r.getUsername(),
+                                if (isManualEntry(r.getUsername())) {
+                                    updateOrAddMiniRow(r.getUsername(),
                                             r.getStatus().getDisplayName(),
                                             r.getPlatform().displayName);
                                 }
@@ -181,7 +170,6 @@ public class SidebarPanel extends VBox {
         return tv;
     }
 
-    /** Verifica se o username já está na mini tabela manual. */
     private boolean isManualEntry(String username) {
         return manualTable.getItems().stream()
                 .anyMatch(r -> r.nameProperty().get().equalsIgnoreCase(username));
@@ -271,17 +259,23 @@ public class SidebarPanel extends VBox {
         box.getStyleClass().add("af-section-content");
         box.setPadding(new Insets(8, 14, 10, 14));
 
-        quantityField = buildNumberField("20");
-        minLenField   = buildNumberField("3");
-        maxLenField   = buildNumberField("5");
+        // Quantity row com botão ∞
+        quantityField  = buildNumberField("20");
+        infiniteLabel  = new Label("∞");
+        infiniteLabel.setStyle("-fx-text-fill: #4a90d9; -fx-font-size: 14px; -fx-font-weight: bold;");
+        infiniteLabel.setVisible(false);
+        infiniteLabel.setManaged(false);
+
+        HBox quantityRow = buildQuantityRow();
+        box.getChildren().add(quantityRow);
+
+        minLenField = buildNumberField("3");
+        maxLenField = buildNumberField("5");
 
         minLenField.focusedProperty().addListener((obs, was, is) -> { if (!is) validateMinMax(); });
         maxLenField.focusedProperty().addListener((obs, was, is) -> { if (!is) validateMinMax(); });
 
         box.getChildren().addAll(
-                buildSpinnerRow("quantity",   quantityField,
-                        () -> stepField(quantityField, 1, 1, 9999),
-                        () -> stepField(quantityField, -1, 1, 9999)),
                 buildSpinnerRow("length min", minLenField,
                         () -> { int max = parseField(maxLenField, 5); stepField(minLenField, 1, 1, max); },
                         () -> stepField(minLenField, -1, 1, 16)),
@@ -306,6 +300,62 @@ public class SidebarPanel extends VBox {
         box.getChildren().add(modeRow);
 
         return box;
+    }
+
+    /** Row especial do quantity com botão ∞ para toggle modo infinito. */
+    private HBox buildQuantityRow() {
+        HBox row = new HBox(4);
+        row.setAlignment(Pos.CENTER_LEFT);
+
+        Label lbl = new Label("quantity");
+        lbl.getStyleClass().add("af-label");
+        lbl.setPrefWidth(80);
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        Button minus = new Button("<");
+        minus.getStyleClass().add("af-btn-small");
+        minus.setOnAction(e -> {
+            if (!isInfinite) stepField(quantityField, -1, 1, 9999);
+        });
+
+        Button plus = new Button(">");
+        plus.getStyleClass().add("af-btn-small");
+        plus.setOnAction(e -> {
+            if (!isInfinite) stepField(quantityField, 1, 1, 9999);
+        });
+
+        // Botão de toggle infinito
+        Button btnInf = new Button("∞");
+        btnInf.getStyleClass().add("af-btn-small");
+        btnInf.setStyle("-fx-text-fill: #4a90d9;");
+        btnInf.setTooltip(new Tooltip("Toggle infinite mode"));
+        btnInf.setOnAction(e -> toggleInfinite());
+
+        row.getChildren().addAll(lbl, spacer, minus, quantityField, plus, btnInf);
+        return row;
+    }
+
+    private void toggleInfinite() {
+        isInfinite = !isInfinite;
+        quantityField.setVisible(!isInfinite);
+        quantityField.setManaged(!isInfinite);
+        infiniteLabel.setVisible(isInfinite);
+        infiniteLabel.setManaged(isInfinite);
+
+        // Substitui o field pelo label ∞ no layout
+        // O label está na row mas precisa aparecer no lugar do field
+        // Solução simples: muda o texto do field
+        if (isInfinite) {
+            quantityField.setText("∞");
+            quantityField.setStyle("-fx-text-fill: #4a90d9; -fx-font-weight: bold;");
+            quantityField.setEditable(false);
+        } else {
+            quantityField.setText("20");
+            quantityField.setStyle("");
+            quantityField.setEditable(true);
+        }
     }
 
     private void validateMinMax() {
@@ -375,7 +425,8 @@ public class SidebarPanel extends VBox {
     public GeneratorConfig buildConfig() {
         validateMinMax();
         GeneratorConfig config = new GeneratorConfig();
-        config.setQuantity(parseField(quantityField, 20));
+        // -1 = infinito
+        config.setQuantity(isInfinite ? -1 : parseField(quantityField, 20));
         config.setMinLength(parseField(minLenField, 3));
         config.setMaxLength(parseField(maxLenField, 5));
         config.setMode("pronounceable".equals(modeCombo.getValue())
@@ -420,7 +471,7 @@ public class SidebarPanel extends VBox {
         field.setPrefWidth(50);
         field.setAlignment(Pos.CENTER);
         field.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (!newVal.matches("\\d*")) field.setText(oldVal);
+            if (!isInfinite && !newVal.matches("\\d*")) field.setText(oldVal);
         });
         return field;
     }
@@ -433,7 +484,8 @@ public class SidebarPanel extends VBox {
     private int parseField(TextField field, int defaultVal) {
         try {
             String text = field.getText().trim();
-            return text.isEmpty() ? defaultVal : Integer.parseInt(text);
+            if (text.isEmpty() || text.equals("∞")) return defaultVal;
+            return Integer.parseInt(text);
         } catch (NumberFormatException e) { return defaultVal; }
     }
 
@@ -471,18 +523,16 @@ public class SidebarPanel extends VBox {
         return combo;
     }
 
-    // ── ManualRow model ────────────────────────────────────────────────
+    // ── ManualRow ──────────────────────────────────────────────────────
 
     public static class ManualRow {
-        private final SimpleBooleanProperty selected  = new SimpleBooleanProperty(false);
-        private final SimpleStringProperty  name      = new SimpleStringProperty();
-        private final SimpleStringProperty  status    = new SimpleStringProperty();
-        private final SimpleStringProperty  platform  = new SimpleStringProperty();
+        private final SimpleBooleanProperty selected = new SimpleBooleanProperty(false);
+        private final SimpleStringProperty  name     = new SimpleStringProperty();
+        private final SimpleStringProperty  status   = new SimpleStringProperty();
+        private final SimpleStringProperty  platform = new SimpleStringProperty();
 
         public ManualRow(String name, String status, String platform) {
-            this.name.set(name);
-            this.status.set(status);
-            this.platform.set(platform);
+            this.name.set(name); this.status.set(status); this.platform.set(platform);
         }
 
         public SimpleBooleanProperty selectedProperty()  { return selected; }
@@ -490,8 +540,6 @@ public class SidebarPanel extends VBox {
         public SimpleStringProperty  statusProperty()    { return status; }
         public SimpleStringProperty  platformProperty()  { return platform; }
     }
-
-    // ── Mini Cells ─────────────────────────────────────────────────────
 
     private static class MiniStatusCell extends TableCell<ManualRow, String> {
         @Override
