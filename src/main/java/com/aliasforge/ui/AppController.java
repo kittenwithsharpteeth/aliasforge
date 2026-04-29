@@ -5,6 +5,7 @@ import com.aliasforge.core.favorites.FavoritesRepository;
 import com.aliasforge.core.history.HistoryRepository;
 import com.aliasforge.core.queue.CheckerQueue;
 import com.aliasforge.model.*;
+import com.aliasforge.util.SystemTrayService;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -49,7 +50,6 @@ public class AppController {
     // ── Controle ───────────────────────────────────────────────────────
 
     public void start(GeneratorConfig config) {
-        // Limpa resultados anteriores antes de começar nova sessão
         Platform.runLater(results::clear);
         LOGGER.info("Starting: platform={}, qty={}, mode={}",
                 config.getPlatform(), config.getQuantity(), config.getMode());
@@ -121,6 +121,7 @@ public class AppController {
 
     private void handleResult(UsernameResult result) {
         updateOrAddResult(result);
+
         if (result.getStatus() != CheckStatus.CHECKING &&
                 result.getStatus() != CheckStatus.PENDING  &&
                 result.getStatus() != CheckStatus.RATE_LIMIT) {
@@ -131,11 +132,18 @@ public class AppController {
 
     private void handleStats(CheckerQueue.CheckerStats stats) {
         if (onStatsUpdate != null) onStatsUpdate.accept(stats);
+
+        // Atualiza tooltip da bandeja com estatísticas simples
+        SystemTrayService.getInstance().setTooltip(
+                "AliasForge — available: " + stats.available() +
+                        " | checked: " + stats.checked()
+        );
     }
 
     private void handleCompleted() {
         LOGGER.info("Checker completed.");
         Platform.runLater(() -> { if (onCompleted != null) onCompleted.run(); });
+        SystemTrayService.getInstance().setTooltip("AliasForge — idle");
     }
 
     private void updateOrAddResult(UsernameResult result) {

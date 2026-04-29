@@ -20,6 +20,7 @@ public class MainWindow extends BorderPane {
     private HistoryView     historyView;
     private FavoritesView   favoritesView;
     private ApiSettingsView apiSettingsView;
+    private LogsView        logsView;
 
     public MainWindow(AppController controller) {
         this.controller = controller;
@@ -40,7 +41,8 @@ public class MainWindow extends BorderPane {
                 buildAliasForgeTab(),
                 buildHistoryTab(),
                 buildFavoritesTab(),
-                buildApiSettingsTab()
+                buildApiSettingsTab(),
+                buildLogsTab()
         );
         return tabPane;
     }
@@ -88,30 +90,39 @@ public class MainWindow extends BorderPane {
         apiSettingsView = new ApiSettingsView();
         ScrollPane scroll = new ScrollPane(apiSettingsView);
         scroll.setFitToWidth(true);
-        scroll.setStyle("-fx-background-color: #1a1a1a; -fx-background: #1a1a1a; -fx-border-color: transparent;");
+        scroll.setStyle("-fx-background-color: #1a1a1a; -fx-background: #1a1a1a;" +
+                "-fx-border-color: transparent;");
         scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         Tab tab = new Tab("api settings");
         tab.setContent(scroll);
         return tab;
     }
 
+    private Tab buildLogsTab() {
+        logsView = new LogsView(controller);
+        VBox content = new VBox(logsView);
+        VBox.setVgrow(logsView, Priority.ALWAYS);
+        Tab tab = new Tab("logs");
+        tab.setContent(content);
+        return tab;
+    }
+
     // ── Wire controller ────────────────────────────────────────────────
 
     private void wireController() {
-        // ── Play ────────────────────────────────────────────────────────
+        // Play
         toolbarPanel.getBtnPlay().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
                 toolbarPanel.setRunningState(true, false);
             } else {
-                var config = sidebarPanel.buildConfig();
-                controller.start(config);
+                controller.start(sidebarPanel.buildConfig());
                 toolbarPanel.setRunningState(true, false);
                 toolbarPanel.resetProgress();
             }
         });
 
-        // ── Pause / Resume ──────────────────────────────────────────────
+        // Pause / Resume
         toolbarPanel.getBtnPause().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
@@ -122,18 +133,17 @@ public class MainWindow extends BorderPane {
             }
         });
 
-        // ── Stop ────────────────────────────────────────────────────────
+        // Stop
         toolbarPanel.getBtnStop().setOnAction(e -> {
             controller.stop();
             toolbarPanel.setRunningState(false, false);
         });
 
-        // ── Filter + Search → ResultsPanel ──────────────────────────────
+        // Filter + Search → ResultsPanel
         toolbarPanel.setOnFilterChanged((filter, search) ->
-                resultsPanel.applyFilter(filter, search)
-        );
+                resultsPanel.applyFilter(filter, search));
 
-        // ── Stats ───────────────────────────────────────────────────────
+        // Stats
         controller.setOnStatsUpdate(stats -> {
             statusBarPanel.updateStats(
                     stats.available(), stats.taken(),
@@ -148,9 +158,8 @@ public class MainWindow extends BorderPane {
             }
         });
 
-        // ── Completed ───────────────────────────────────────────────────
+        // Completed
         controller.setOnCompleted(() ->
-                toolbarPanel.setRunningState(false, false)
-        );
+                toolbarPanel.setRunningState(false, false));
     }
 }
