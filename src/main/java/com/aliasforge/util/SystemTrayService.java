@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.awt.*;
-import java.awt.event.ActionListener;
 import java.net.URL;
 
 /**
@@ -36,15 +35,6 @@ public class SystemTrayService {
 
     // ── Instalação ─────────────────────────────────────────────────────
 
-    /**
-     * Instala o ícone na bandeja do sistema.
-     * Deve ser chamado na AWT thread (antes de qualquer JavaFX).
-     *
-     * @param onShow   Callback para mostrar a janela
-     * @param onExit   Callback para encerrar o app
-     * @param onPause  Callback para pausar o checker
-     * @param onResume Callback para retomar o checker
-     */
     public void install(Runnable onShow, Runnable onExit,
                         Runnable onPause, Runnable onResume) {
         if (!SystemTray.isSupported()) {
@@ -60,25 +50,18 @@ public class SystemTrayService {
         try {
             tray = SystemTray.getSystemTray();
 
-            // Carrega o ícone do resources
             Image image = loadIcon();
-
-            // Menu popup da bandeja
             PopupMenu popup = buildPopupMenu();
 
             trayIcon = new TrayIcon(image, "AliasForge", popup);
             trayIcon.setImageAutoSize(true);
 
-            // Duplo clique abre a janela
             trayIcon.addActionListener(e -> {
                 if (onShow != null) onShow.run();
             });
 
             tray.add(trayIcon);
             installed = true;
-
-            // Inicializa o serviço de notificações com este ícone
-            NotificationService.getInstance().init(trayIcon);
 
             LOGGER.info("System tray icon installed.");
 
@@ -98,8 +81,6 @@ public class SystemTrayService {
 
         MenuItem itemResume = new MenuItem("Resume Checker");
         itemResume.addActionListener(e -> { if (onResume != null) onResume.run(); });
-
-        MenuItem itemSep = new MenuItem("-");
 
         MenuItem itemExit = new MenuItem("Exit");
         itemExit.addActionListener(e -> { if (onExit != null) onExit.run(); });
@@ -123,12 +104,10 @@ public class SystemTrayService {
         } catch (Exception e) {
             LOGGER.warn("Could not load tray icon from resources: {}", e.getMessage());
         }
-        // Fallback: cria um ícone simples 16x16 azul
         return createFallbackIcon();
     }
 
     private Image createFallbackIcon() {
-        // Cria um ícone simples programaticamente caso o PNG não seja encontrado
         java.awt.image.BufferedImage img =
                 new java.awt.image.BufferedImage(16, 16,
                         java.awt.image.BufferedImage.TYPE_INT_ARGB);
@@ -145,7 +124,6 @@ public class SystemTrayService {
 
     // ── Controle ───────────────────────────────────────────────────────
 
-    /** Remove o ícone da bandeja. */
     public void uninstall() {
         if (installed && tray != null && trayIcon != null) {
             tray.remove(trayIcon);
@@ -154,14 +132,12 @@ public class SystemTrayService {
         }
     }
 
-    /** Mostra uma mensagem de balão na bandeja. */
     public void showMessage(String title, String message) {
         if (installed && trayIcon != null) {
             trayIcon.displayMessage(title, message, TrayIcon.MessageType.INFO);
         }
     }
 
-    /** Atualiza o tooltip do ícone na bandeja. */
     public void setTooltip(String text) {
         if (installed && trayIcon != null) {
             trayIcon.setToolTip(text);

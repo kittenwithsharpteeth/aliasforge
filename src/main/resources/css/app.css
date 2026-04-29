@@ -5,16 +5,16 @@
 
 /* ── Variáveis de cor ─────────────────────────────────────────── */
 * {
-    -af-bg-0:        #1a1a1a;   /* fundo mais escuro (janela) */
-    -af-bg-1:        #222222;   /* fundo painel principal */
-    -af-bg-2:        #2a2a2a;   /* fundo sidebar / seções */
-    -af-bg-3:        #313131;   /* fundo hover / input */
-    -af-bg-4:        #3a3a3a;   /* fundo botões */
-    -af-border:      #404040;   /* bordas */
-    -af-border-dark: #303030;   /* bordas mais escuras */
-    -af-text:        #cccccc;   /* texto principal */
-    -af-text-muted:  #777777;   /* texto secundário */
-    -af-accent:      #4a90d9;   /* azul de seleção */
+    -af-bg-0:        #1a1a1a;
+    -af-bg-1:        #222222;
+    -af-bg-2:        #2a2a2a;
+    -af-bg-3:        #313131;
+    -af-bg-4:        #3a3a3a;
+    -af-border:      #404040;
+    -af-border-dark: #303030;
+    -af-text:        #cccccc;
+    -af-text-muted:  #777777;
+    -af-accent:      #4a90d9;
     -af-available:   #4caf50;
     -af-taken:       #f44336;
     -af-ratelimit:   #ffc107;
@@ -24,6 +24,18 @@
 
 /* ── Base da janela ───────────────────────────────────────────── */
 .root {
+    /* Variáveis do AtlantaFX necessárias para evitar warnings de CSS */
+    -color-fg-default:     #cccccc;
+    -color-fg-muted:       #777777;
+    -color-fg-subtle:      #555555;
+    -color-accent-fg:      #4a90d9;
+    -color-danger-fg:      #f44336;
+    -color-success-fg:     #4caf50;
+    -color-warning-fg:     #ffc107;
+    -color-bg-default:     #1a1a1a;
+    -color-bg-overlay:     #2a2a2a;
+    -color-border-default: #404040;
+
     -fx-background-color: #1a1a1a;
     -fx-font-family: "Segoe UI", "Inter", sans-serif;
     -fx-font-size: 12px;
