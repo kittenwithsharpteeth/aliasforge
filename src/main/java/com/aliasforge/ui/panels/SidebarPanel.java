@@ -1,5 +1,7 @@
 package com.aliasforge.ui.panels;
 
+import com.aliasforge.config.AppConfig;
+import com.aliasforge.model.AppSettings;
 import com.aliasforge.model.GeneratorConfig;
 import com.aliasforge.model.Platform;
 import com.aliasforge.ui.AppController;
@@ -14,23 +16,27 @@ import javafx.scene.layout.*;
 public class SidebarPanel extends VBox {
 
     private final AppController controller;
+    private final AppSettings   settings = AppConfig.getInstance().getSettings();
 
+    // ── Geração ────────────────────────────────────────────────────────
     private TextField        quantityField;
-    private boolean          isInfinite = false;
-    private Label            infiniteLabel;   // mostra "∞" quando infinito
+    private boolean          isInfinite;
     private TextField        minLenField;
     private TextField        maxLenField;
     private ComboBox<String> modeCombo;
     private ComboBox<String> algorithmPlatformCombo;
 
+    // ── Filtros ────────────────────────────────────────────────────────
     private CheckBox chkStartsWith; private TextField startsWith;
     private CheckBox chkEndsWith;   private TextField endsWith;
     private CheckBox chkContains;   private TextField contains;
 
+    // ── Caracteres ────────────────────────────────────────────────────
     private CheckBox chkLetters, chkNumbers, chkUnderscore, chkPeriod;
 
-    private TextField        manualInput;
-    private ComboBox<String> manualPlatformCombo;
+    // ── Manual verifier ────────────────────────────────────────────────
+    private TextField            manualInput;
+    private ComboBox<String>     manualPlatformCombo;
     private TableView<ManualRow> manualTable;
 
     public SidebarPanel(AppController controller) {
@@ -42,6 +48,7 @@ public class SidebarPanel extends VBox {
         setFillWidth(true);
         setSpacing(0);
         buildUI();
+        loadSettings(); // Carrega configurações salvas
     }
 
     private void buildUI() {
@@ -68,6 +75,11 @@ public class SidebarPanel extends VBox {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         manualPlatformCombo = buildPlatformCombo("minecraft");
+        // Salva ao mudar
+        manualPlatformCombo.setOnAction(e -> {
+            settings.setLastManualPlatform(manualPlatformCombo.getValue());
+            AppConfig.getInstance().save();
+        });
         header.getChildren().addAll(title, spacer, manualPlatformCombo);
 
         HBox inputRow = new HBox(6);
@@ -147,21 +159,19 @@ public class SidebarPanel extends VBox {
                     while (change.next()) {
                         if (change.wasAdded()) {
                             for (var r : change.getAddedSubList()) {
-                                if (isManualEntry(r.getUsername())) {
+                                if (isManualEntry(r.getUsername()))
                                     updateOrAddMiniRow(r.getUsername(),
                                             r.getStatus().getDisplayName(),
                                             r.getPlatform().displayName);
-                                }
                             }
                         }
                         if (change.wasReplaced()) {
                             for (int i = change.getFrom(); i < change.getTo(); i++) {
                                 var r = controller.getResults().get(i);
-                                if (isManualEntry(r.getUsername())) {
+                                if (isManualEntry(r.getUsername()))
                                     updateOrAddMiniRow(r.getUsername(),
                                             r.getStatus().getDisplayName(),
                                             r.getPlatform().displayName);
-                                }
                             }
                         }
                     }
@@ -201,7 +211,10 @@ public class SidebarPanel extends VBox {
         title.getStyleClass().add("af-section-title");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
+
         algorithmPlatformCombo = buildPlatformCombo("minecraft");
+        algorithmPlatformCombo.setOnAction(e -> saveSettings());
+
         Label platformLbl = new Label("platform:");
         platformLbl.getStyleClass().add("af-label-muted");
         header.getChildren().addAll(title, spacer, platformLbl, algorithmPlatformCombo);
@@ -259,35 +272,30 @@ public class SidebarPanel extends VBox {
         box.getStyleClass().add("af-section-content");
         box.setPadding(new Insets(8, 14, 10, 14));
 
-        // Quantity row com botão ∞
-        quantityField  = buildNumberField("20");
-        infiniteLabel  = new Label("∞");
-        infiniteLabel.setStyle("-fx-text-fill: #4a90d9; -fx-font-size: 14px; -fx-font-weight: bold;");
-        infiniteLabel.setVisible(false);
-        infiniteLabel.setManaged(false);
+        quantityField = buildNumberField("20");
+        minLenField   = buildNumberField("3");
+        maxLenField   = buildNumberField("5");
 
-        HBox quantityRow = buildQuantityRow();
-        box.getChildren().add(quantityRow);
+        // Salva ao sair dos campos
+        quantityField.focusedProperty().addListener((obs, was, is) -> { if (!is) saveSettings(); });
+        minLenField.focusedProperty().addListener((obs, was, is)   -> { if (!is) { validateMinMax(); saveSettings(); } });
+        maxLenField.focusedProperty().addListener((obs, was, is)   -> { if (!is) { validateMinMax(); saveSettings(); } });
 
-        minLenField = buildNumberField("3");
-        maxLenField = buildNumberField("5");
-
-        minLenField.focusedProperty().addListener((obs, was, is) -> { if (!is) validateMinMax(); });
-        maxLenField.focusedProperty().addListener((obs, was, is) -> { if (!is) validateMinMax(); });
-
+        box.getChildren().add(buildQuantityRow());
         box.getChildren().addAll(
                 buildSpinnerRow("length min", minLenField,
-                        () -> { int max = parseField(maxLenField, 5); stepField(minLenField, 1, 1, max); },
-                        () -> stepField(minLenField, -1, 1, 16)),
+                        () -> { int max = parseField(maxLenField, 5); stepField(minLenField, 1, 1, max); saveSettings(); },
+                        () -> { stepField(minLenField, -1, 1, 16); saveSettings(); }),
                 buildSpinnerRow("length max", maxLenField,
-                        () -> stepField(maxLenField, 1, 1, 16),
-                        () -> { int min = parseField(minLenField, 1); stepField(maxLenField, -1, min, 16); })
+                        () -> { stepField(maxLenField, 1, 1, 16); saveSettings(); },
+                        () -> { int min = parseField(minLenField, 1); stepField(maxLenField, -1, min, 16); saveSettings(); })
         );
 
         modeCombo = new ComboBox<>();
         modeCombo.getItems().addAll("random", "pronounceable");
         modeCombo.setValue("random");
         modeCombo.getStyleClass().add("af-combo");
+        modeCombo.setOnAction(e -> saveSettings());
 
         HBox modeRow = new HBox(6);
         modeRow.setAlignment(Pos.CENTER_LEFT);
@@ -302,7 +310,6 @@ public class SidebarPanel extends VBox {
         return box;
     }
 
-    /** Row especial do quantity com botão ∞ para toggle modo infinito. */
     private HBox buildQuantityRow() {
         HBox row = new HBox(4);
         row.setAlignment(Pos.CENTER_LEFT);
@@ -310,28 +317,22 @@ public class SidebarPanel extends VBox {
         Label lbl = new Label("quantity");
         lbl.getStyleClass().add("af-label");
         lbl.setPrefWidth(80);
-
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         Button minus = new Button("<");
         minus.getStyleClass().add("af-btn-small");
-        minus.setOnAction(e -> {
-            if (!isInfinite) stepField(quantityField, -1, 1, 9999);
-        });
+        minus.setOnAction(e -> { if (!isInfinite) { stepField(quantityField, -1, 1, 9999); saveSettings(); } });
 
         Button plus = new Button(">");
         plus.getStyleClass().add("af-btn-small");
-        plus.setOnAction(e -> {
-            if (!isInfinite) stepField(quantityField, 1, 1, 9999);
-        });
+        plus.setOnAction(e -> { if (!isInfinite) { stepField(quantityField, 1, 1, 9999); saveSettings(); } });
 
-        // Botão de toggle infinito
         Button btnInf = new Button("∞");
         btnInf.getStyleClass().add("af-btn-small");
         btnInf.setStyle("-fx-text-fill: #4a90d9;");
         btnInf.setTooltip(new Tooltip("Toggle infinite mode"));
-        btnInf.setOnAction(e -> toggleInfinite());
+        btnInf.setOnAction(e -> { toggleInfinite(); saveSettings(); });
 
         row.getChildren().addAll(lbl, spacer, minus, quantityField, plus, btnInf);
         return row;
@@ -339,20 +340,12 @@ public class SidebarPanel extends VBox {
 
     private void toggleInfinite() {
         isInfinite = !isInfinite;
-        quantityField.setVisible(!isInfinite);
-        quantityField.setManaged(!isInfinite);
-        infiniteLabel.setVisible(isInfinite);
-        infiniteLabel.setManaged(isInfinite);
-
-        // Substitui o field pelo label ∞ no layout
-        // O label está na row mas precisa aparecer no lugar do field
-        // Solução simples: muda o texto do field
         if (isInfinite) {
             quantityField.setText("∞");
             quantityField.setStyle("-fx-text-fill: #4a90d9; -fx-font-weight: bold;");
             quantityField.setEditable(false);
         } else {
-            quantityField.setText("20");
+            quantityField.setText(String.valueOf(settings.getLastQuantity()));
             quantityField.setStyle("");
             quantityField.setEditable(true);
         }
@@ -379,9 +372,11 @@ public class SidebarPanel extends VBox {
 
         for (TextField f : new TextField[]{startsWith, endsWith, contains}) {
             f.getStyleClass().add("af-input"); f.setPrefWidth(100);
+            f.focusedProperty().addListener((obs, was, is) -> { if (!is) saveSettings(); });
         }
         for (CheckBox c : new CheckBox[]{chkStartsWith, chkEndsWith, chkContains}) {
             c.getStyleClass().add("af-checkbox");
+            c.setOnAction(e -> saveSettings());
         }
         startsWith.setPromptText("prefix");
         endsWith.setPromptText("suffix");
@@ -409,6 +404,7 @@ public class SidebarPanel extends VBox {
 
         for (CheckBox c : new CheckBox[]{chkLetters, chkNumbers, chkUnderscore, chkPeriod}) {
             c.getStyleClass().add("af-checkbox");
+            c.setOnAction(e -> saveSettings());
         }
 
         box.getChildren().addAll(
@@ -420,12 +416,86 @@ public class SidebarPanel extends VBox {
         return box;
     }
 
+    // ── Persistência ───────────────────────────────────────────────────
+
+    /** Carrega todas as configurações salvas nos controles da UI. */
+    private void loadSettings() {
+        // Geração
+        isInfinite = settings.isLastInfinite();
+        if (isInfinite) {
+            quantityField.setText("∞");
+            quantityField.setStyle("-fx-text-fill: #4a90d9; -fx-font-weight: bold;");
+            quantityField.setEditable(false);
+        } else {
+            quantityField.setText(String.valueOf(settings.getLastQuantity()));
+        }
+        minLenField.setText(String.valueOf(settings.getLastMinLength()));
+        maxLenField.setText(String.valueOf(settings.getLastMaxLength()));
+        modeCombo.setValue(settings.getLastMode());
+
+        String lastPlatform = settings.getLastPlatform();
+        if (algorithmPlatformCombo.getItems().contains(lastPlatform)) {
+            algorithmPlatformCombo.setValue(lastPlatform);
+        }
+
+        // Filtros
+        chkStartsWith.setSelected(settings.isFilterStartsWith());
+        startsWith.setText(settings.getFilterStartsWithVal());
+        chkEndsWith.setSelected(settings.isFilterEndsWith());
+        endsWith.setText(settings.getFilterEndsWithVal());
+        chkContains.setSelected(settings.isFilterContains());
+        contains.setText(settings.getFilterContainsVal());
+
+        // Caracteres
+        chkLetters.setSelected(settings.isUseLetters());
+        chkNumbers.setSelected(settings.isUseNumbers());
+        chkUnderscore.setSelected(settings.isUseUnderscore());
+        chkPeriod.setSelected(settings.isUsePeriod());
+
+        // Manual verifier platform
+        String lastManual = settings.getLastManualPlatform();
+        if (manualPlatformCombo.getItems().contains(lastManual)) {
+            manualPlatformCombo.setValue(lastManual);
+        }
+    }
+
+    /** Salva o estado atual de todos os controles. */
+    private void saveSettings() {
+        // Geração
+        settings.setLastInfinite(isInfinite);
+        settings.setLastQuantity(isInfinite ? 20 : parseField(quantityField, 20));
+        settings.setLastMinLength(parseField(minLenField, 3));
+        settings.setLastMaxLength(parseField(maxLenField, 5));
+        settings.setLastMode(modeCombo.getValue() != null ? modeCombo.getValue() : "random");
+        settings.setLastPlatform(algorithmPlatformCombo.getValue() != null
+                ? algorithmPlatformCombo.getValue() : "minecraft");
+
+        // Filtros
+        settings.setFilterStartsWith(chkStartsWith.isSelected());
+        settings.setFilterStartsWithVal(startsWith.getText());
+        settings.setFilterEndsWith(chkEndsWith.isSelected());
+        settings.setFilterEndsWithVal(endsWith.getText());
+        settings.setFilterContains(chkContains.isSelected());
+        settings.setFilterContainsVal(contains.getText());
+
+        // Caracteres
+        settings.setUseLetters(chkLetters.isSelected());
+        settings.setUseNumbers(chkNumbers.isSelected());
+        settings.setUseUnderscore(chkUnderscore.isSelected());
+        settings.setUsePeriod(chkPeriod.isSelected());
+
+        // Manual
+        settings.setLastManualPlatform(manualPlatformCombo.getValue() != null
+                ? manualPlatformCombo.getValue() : "minecraft");
+
+        AppConfig.getInstance().save();
+    }
+
     // ── buildConfig() ──────────────────────────────────────────────────
 
     public GeneratorConfig buildConfig() {
         validateMinMax();
         GeneratorConfig config = new GeneratorConfig();
-        // -1 = infinito
         config.setQuantity(isInfinite ? -1 : parseField(quantityField, 20));
         config.setMinLength(parseField(minLenField, 3));
         config.setMaxLength(parseField(maxLenField, 5));

@@ -1,10 +1,42 @@
 /* ═══════════════════════════════════════════════════════════════
    AliasForge — Dark Theme
-   Inspirado no design Blender/Figma do usuário
    ═══════════════════════════════════════════════════════════════ */
 
-/* ── Variáveis de cor ─────────────────────────────────────────── */
-* {
+/* ── Root com variáveis AtlantaFX + variáveis AF ─────────────── */
+.root {
+    /* AtlantaFX PrimerDark color variables — necessário para evitar
+       warnings de CSS quando a janela está em segundo plano (system tray) */
+    -color-fg-default:        #e6edf3;
+    -color-fg-muted:          #8b949e;
+    -color-fg-subtle:         #6e7681;
+    -color-fg-on-emphasis:    #ffffff;
+    -color-canvas-default:    #0d1117;
+    -color-canvas-subtle:     #161b22;
+    -color-border-default:    #30363d;
+    -color-border-muted:      #21262d;
+    -color-border-subtle:     rgba(240,246,252,0.1);
+    -color-accent-fg:         #58a6ff;
+    -color-accent-emphasis:   #1f6feb;
+    -color-accent-muted:      rgba(56,139,253,0.4);
+    -color-accent-subtle:     rgba(56,139,253,0.15);
+    -color-success-fg:        #3fb950;
+    -color-success-emphasis:  #238636;
+    -color-success-muted:     rgba(46,160,67,0.4);
+    -color-success-subtle:    rgba(46,160,67,0.15);
+    -color-danger-fg:         #f85149;
+    -color-danger-emphasis:   #da3633;
+    -color-danger-muted:      rgba(248,81,73,0.4);
+    -color-danger-subtle:     rgba(248,81,73,0.15);
+    -color-warning-fg:        #d29922;
+    -color-warning-emphasis:  #9e6a03;
+    -color-warning-muted:     rgba(187,128,9,0.4);
+    -color-warning-subtle:    rgba(187,128,9,0.15);
+    -color-neutral-emphasis-plus: #6e7681;
+    -color-neutral-emphasis:  #6e7681;
+    -color-neutral-muted:     rgba(110,118,129,0.4);
+    -color-neutral-subtle:    rgba(110,118,129,0.1);
+
+    /* Variáveis AliasForge */
     -af-bg-0:        #1a1a1a;
     -af-bg-1:        #222222;
     -af-bg-2:        #2a2a2a;
@@ -20,21 +52,6 @@
     -af-ratelimit:   #ffc107;
     -af-error:       #757575;
     -af-checking:    #2196f3;
-}
-
-/* ── Base da janela ───────────────────────────────────────────── */
-.root {
-    /* Variáveis do AtlantaFX necessárias para evitar warnings de CSS */
-    -color-fg-default:     #cccccc;
-    -color-fg-muted:       #777777;
-    -color-fg-subtle:      #555555;
-    -color-accent-fg:      #4a90d9;
-    -color-danger-fg:      #f44336;
-    -color-success-fg:     #4caf50;
-    -color-warning-fg:     #ffc107;
-    -color-bg-default:     #1a1a1a;
-    -color-bg-overlay:     #2a2a2a;
-    -color-border-default: #404040;
 
     -fx-background-color: #1a1a1a;
     -fx-font-family: "Segoe UI", "Inter", sans-serif;
@@ -46,7 +63,7 @@
     -fx-background-color: #1a1a1a;
 }
 
-/* ── TabPane (abas do topo) ───────────────────────────────────── */
+/* ── TabPane ──────────────────────────────────────────────────── */
 .tab-pane {
     -fx-background-color: #1a1a1a;
     -fx-tab-min-height: 28px;
@@ -97,7 +114,7 @@
     -fx-max-height: 38px;
 }
 
-/* ── Botões gerais ────────────────────────────────────────────── */
+/* ── Botões ───────────────────────────────────────────────────── */
 .af-btn {
     -fx-background-color: #333333;
     -fx-text-fill: #bbbbbb;
@@ -120,24 +137,13 @@
     -fx-background-color: #2a2a2a;
 }
 
-.af-btn-play {
-    -fx-text-fill: #4caf50;
-    -fx-border-color: #3a6b3c;
-}
+.af-btn-play  { -fx-text-fill: #4caf50; -fx-border-color: #3a6b3c; }
+.af-btn-pause { -fx-text-fill: #ffc107; -fx-border-color: #6b5a1a; }
+.af-btn-stop  { -fx-text-fill: #f44336; -fx-border-color: #6b2e2a; }
 
 .af-btn-play:hover {
     -fx-background-color: #2d3d2d;
     -fx-text-fill: #66bb6a;
-}
-
-.af-btn-pause {
-    -fx-text-fill: #ffc107;
-    -fx-border-color: #6b5a1a;
-}
-
-.af-btn-stop {
-    -fx-text-fill: #f44336;
-    -fx-border-color: #6b2e2a;
 }
 
 .af-btn-small {
@@ -167,32 +173,13 @@
     -fx-font-size: 11px;
 }
 
-.af-btn-icon:hover {
-    -fx-text-fill: #aaaaaa;
-}
+.af-btn-icon:hover { -fx-text-fill: #aaaaaa; }
 
 /* ── Labels ───────────────────────────────────────────────────── */
-.af-label {
-    -fx-text-fill: #aaaaaa;
-    -fx-font-size: 12px;
-}
-
-.af-label-muted {
-    -fx-text-fill: #666666;
-    -fx-font-size: 11px;
-}
-
-.af-output-label {
-    -fx-text-fill: #666666;
-    -fx-font-size: 11px;
-    -fx-font-style: italic;
-}
-
-.af-value {
-    -fx-text-fill: #cccccc;
-    -fx-font-size: 12px;
-    -fx-alignment: center;
-}
+.af-label        { -fx-text-fill: #aaaaaa; -fx-font-size: 12px; }
+.af-label-muted  { -fx-text-fill: #666666; -fx-font-size: 11px; }
+.af-output-label { -fx-text-fill: #666666; -fx-font-size: 11px; -fx-font-style: italic; }
+.af-value        { -fx-text-fill: #cccccc; -fx-font-size: 12px; -fx-alignment: center; }
 
 /* ── Inputs ───────────────────────────────────────────────────── */
 .af-input, .af-search {
@@ -221,7 +208,8 @@
     -fx-background-radius: 3px;
 }
 
-.af-combo .list-cell, .af-combo-platform .list-cell {
+.af-combo .list-cell,
+.af-combo-platform .list-cell {
     -fx-background-color: #2e2e2e;
     -fx-text-fill: #cccccc;
     -fx-padding: 3px 8px;
@@ -238,18 +226,14 @@
     -fx-background-color: #3a3a3a;
 }
 
-.af-combo .arrow-button, .af-combo-platform .arrow-button {
-    -fx-background-color: transparent;
-}
+.af-combo .arrow-button,
+.af-combo-platform .arrow-button { -fx-background-color: transparent; }
 
-.af-combo .arrow, .af-combo-platform .arrow {
-    -fx-background-color: #888888;
-}
+.af-combo .arrow,
+.af-combo-platform .arrow { -fx-background-color: #888888; }
 
-/* ── Tabela de resultados ─────────────────────────────────────── */
-.results-panel {
-    -fx-background-color: #1e1e1e;
-}
+/* ── Tabela ───────────────────────────────────────────────────── */
+.results-panel { -fx-background-color: #1e1e1e; }
 
 .af-table {
     -fx-background-color: #1e1e1e;
@@ -283,17 +267,9 @@
     -fx-cell-size: 24px;
 }
 
-.af-table .table-row-cell:odd {
-    -fx-background-color: #202020;
-}
-
-.af-table .table-row-cell:hover {
-    -fx-background-color: #2a2a2a;
-}
-
-.af-table .table-row-cell:selected {
-    -fx-background-color: #1e3a5a;
-}
+.af-table .table-row-cell:odd  { -fx-background-color: #202020; }
+.af-table .table-row-cell:hover { -fx-background-color: #2a2a2a; }
+.af-table .table-row-cell:selected { -fx-background-color: #1e3a5a; }
 
 .af-table .table-cell {
     -fx-text-fill: #bbbbbb;
@@ -302,7 +278,7 @@
     -fx-alignment: center-left;
 }
 
-/* ── Action bar (copy / re-check / clear) ─────────────────────── */
+/* ── Action bar ───────────────────────────────────────────────── */
 .af-action-bar {
     -fx-background-color: #222222;
     -fx-border-color: transparent transparent #333333 transparent;
@@ -332,15 +308,10 @@
     -fx-max-height: 32px;
 }
 
-.af-section-title {
-    -fx-text-fill: #999999;
-    -fx-font-size: 11px;
-}
+.af-section-title  { -fx-text-fill: #999999; -fx-font-size: 11px; }
 
 /* ── Seções colapsáveis ───────────────────────────────────────── */
-.af-collapsible {
-    -fx-background-color: #222222;
-}
+.af-collapsible { -fx-background-color: #222222; }
 
 .af-collapsible-header {
     -fx-background-color: #252525;
@@ -351,19 +322,9 @@
     -fx-cursor: hand;
 }
 
-.af-collapsible-header:hover {
-    -fx-background-color: #2c2c2c;
-}
-
-.af-collapsible-title {
-    -fx-text-fill: #aaaaaa;
-    -fx-font-size: 12px;
-}
-
-.af-collapse-arrow {
-    -fx-text-fill: #666666;
-    -fx-font-size: 10px;
-}
+.af-collapsible-header:hover { -fx-background-color: #2c2c2c; }
+.af-collapsible-title { -fx-text-fill: #aaaaaa; -fx-font-size: 12px; }
+.af-collapse-arrow    { -fx-text-fill: #666666; -fx-font-size: 10px; }
 
 .af-section-content {
     -fx-background-color: #242424;
@@ -372,9 +333,7 @@
 }
 
 /* ── Checkbox ─────────────────────────────────────────────────── */
-.af-checkbox {
-    -fx-text-fill: #aaaaaa;
-}
+.af-checkbox { -fx-text-fill: #aaaaaa; }
 
 .af-checkbox .box {
     -fx-background-color: #2e2e2e;
@@ -388,41 +347,7 @@
     -fx-border-color: #3a7ac9;
 }
 
-.af-checkbox .mark {
-    -fx-background-color: white;
-}
-
-/* ── Mini lista (quick verifier) ──────────────────────────────── */
-.af-mini-list {
-    -fx-background-color: #1e1e1e;
-    -fx-border-color: #333333;
-    -fx-border-width: 1px;
-    -fx-border-radius: 3px;
-    -fx-background-radius: 3px;
-}
-
-.af-mini-list .list-cell {
-    -fx-background-color: transparent;
-    -fx-text-fill: #aaaaaa;
-    -fx-font-size: 11px;
-    -fx-padding: 3px 8px;
-    -fx-border-color: transparent transparent #2a2a2a transparent;
-    -fx-border-width: 1px;
-}
-
-.af-mini-list .list-cell:hover {
-    -fx-background-color: #2a2a2a;
-}
-
-.af-mini-list .list-cell:selected {
-    -fx-background-color: #1e3a5a;
-    -fx-text-fill: #cccccc;
-}
-
-/* ── Separadores ──────────────────────────────────────────────── */
-.af-separator {
-    -fx-background-color: #333333;
-}
+.af-checkbox .mark { -fx-background-color: white; }
 
 /* ── Scroll ───────────────────────────────────────────────────── */
 .af-scroll {
@@ -431,24 +356,15 @@
     -fx-border-color: transparent;
 }
 
-.af-scroll .viewport {
-    -fx-background-color: transparent;
-}
-
-.af-scroll .scroll-bar {
-    -fx-background-color: #1e1e1e;
-}
-
+.af-scroll .viewport         { -fx-background-color: transparent; }
+.af-scroll .scroll-bar       { -fx-background-color: #1e1e1e; }
 .af-scroll .scroll-bar .thumb {
     -fx-background-color: #3a3a3a;
     -fx-background-radius: 3px;
 }
+.af-scroll .scroll-bar .thumb:hover { -fx-background-color: #484848; }
 
-.af-scroll .scroll-bar .thumb:hover {
-    -fx-background-color: #484848;
-}
-
-/* ── Barra de progresso ───────────────────────────────────────── */
+/* ── Progress bar ─────────────────────────────────────────────── */
 .af-progress {
     -fx-background-color: #2a2a2a;
     -fx-border-color: #3a3a3a;
@@ -469,7 +385,7 @@
     -fx-background-radius: 2px;
 }
 
-/* ── Status bar (rodapé) ──────────────────────────────────────── */
+/* ── Status bar ───────────────────────────────────────────────── */
 .status-bar {
     -fx-background-color: #1c1c1c;
     -fx-border-color: #333333 transparent transparent transparent;
@@ -479,12 +395,32 @@
 }
 
 /* ── SplitPane ────────────────────────────────────────────────── */
-.split-pane {
-    -fx-background-color: #1a1a1a;
-    -fx-padding: 0;
+.split-pane            { -fx-background-color: #1a1a1a; -fx-padding: 0; }
+.split-pane-divider    { -fx-background-color: #333333; -fx-padding: 0 1px; }
+
+/* ── Mini list ────────────────────────────────────────────────── */
+.af-mini-list {
+    -fx-background-color: #1e1e1e;
+    -fx-border-color: #333333;
+    -fx-border-width: 1px;
+    -fx-border-radius: 3px;
+    -fx-background-radius: 3px;
 }
 
-.split-pane-divider {
-    -fx-background-color: #333333;
-    -fx-padding: 0 1px;
+.af-mini-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #aaaaaa;
+    -fx-font-size: 11px;
+    -fx-padding: 3px 8px;
+    -fx-border-color: transparent transparent #2a2a2a transparent;
+    -fx-border-width: 1px;
 }
+
+.af-mini-list .list-cell:hover    { -fx-background-color: #2a2a2a; }
+.af-mini-list .list-cell:selected {
+    -fx-background-color: #1e3a5a;
+    -fx-text-fill: #cccccc;
+}
+
+/* ── Separadores ──────────────────────────────────────────────── */
+.af-separator { -fx-background-color: #333333; }
