@@ -37,7 +37,7 @@ public class Main extends Application {
         try {
             Image icon = new Image(
                     Objects.requireNonNull(
-                            getClass().getResourceAsStream("/icons/icon.png")));
+                            getClass().getResourceAsStream("/icons/icon.jpg")));
             stage.getIcons().add(icon);
         } catch (Exception e) {
             LOGGER.warn("Could not load window icon: {}", e.getMessage());
