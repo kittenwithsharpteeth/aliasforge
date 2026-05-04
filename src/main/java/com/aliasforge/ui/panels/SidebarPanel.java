@@ -11,7 +11,12 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.CheckBoxTableCell;
+import javafx.scene.input.*;
 import javafx.scene.layout.*;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 public class SidebarPanel extends VBox {
 
@@ -31,13 +36,29 @@ public class SidebarPanel extends VBox {
     private CheckBox chkEndsWith;   private TextField endsWith;
     private CheckBox chkContains;   private TextField contains;
 
-    // ── Caracteres ────────────────────────────────────────────────────
+    // ── Caracteres ─────────────────────────────────────────────────────
     private CheckBox chkLetters, chkNumbers, chkUnderscore, chkPeriod;
 
     // ── Manual verifier ────────────────────────────────────────────────
     private TextField            manualInput;
     private ComboBox<String>     manualPlatformCombo;
     private TableView<ManualRow> manualTable;
+
+    // ── Seções reordenáveis ────────────────────────────────────────────
+    private VBox sectionsContainer;
+    private VBox sectionGeneration;
+    private VBox sectionFilters;
+    private VBox sectionCharacters;
+    private final List<String> sectionOrder = new ArrayList<>();
+
+    // ── Drag & Drop state ──────────────────────────────────────────────
+    // Nome da seção sendo arrastada
+    private String dragSourceName = null;
+    // Estilo original do header durante o drag
+    private static final String HEADER_DRAG_OVER_STYLE =
+            "-fx-background-color: #2e3d4f; " +
+                    "-fx-border-color: #4a90d9 transparent #4a90d9 transparent; " +
+                    "-fx-border-width: 1px;";
 
     public SidebarPanel(AppController controller) {
         this.controller = controller;
@@ -48,7 +69,7 @@ public class SidebarPanel extends VBox {
         setFillWidth(true);
         setSpacing(0);
         buildUI();
-        loadSettings(); // Carrega configurações salvas
+        loadSettings();
     }
 
     private void buildUI() {
@@ -56,9 +77,29 @@ public class SidebarPanel extends VBox {
         Separator sep = new Separator();
         sep.getStyleClass().add("af-separator");
         VBox optionsHeader = buildOptionsHeader();
-        VBox sections = buildSections();
-        VBox.setVgrow(sections, Priority.ALWAYS);
-        getChildren().addAll(quickVerifier, sep, optionsHeader, sections);
+
+        // Constrói os conteúdos das seções
+        VBox generationContent = buildGenerationContent();
+        VBox filtersContent    = buildFiltersContent();
+        VBox charactersContent = buildCharactersContent();
+
+        // Cria as seções reordenáveis
+        sectionGeneration = buildCollapsibleSection("generation",  generationContent);
+        sectionFilters    = buildCollapsibleSection("filters",     filtersContent);
+        sectionCharacters = buildCollapsibleSection("characters",  charactersContent);
+
+        sectionsContainer = new VBox(0);
+
+        ScrollPane scroll = new ScrollPane(sectionsContainer);
+        scroll.setFitToWidth(true);
+        scroll.getStyleClass().add("af-scroll");
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+
+        VBox scrollWrapper = new VBox(scroll);
+        VBox.setVgrow(scroll, Priority.ALWAYS);
+        VBox.setVgrow(scrollWrapper, Priority.ALWAYS);
+
+        getChildren().addAll(quickVerifier, sep, optionsHeader, scrollWrapper);
     }
 
     // ── Quick Manual Verifier ──────────────────────────────────────────
@@ -75,7 +116,6 @@ public class SidebarPanel extends VBox {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         manualPlatformCombo = buildPlatformCombo("minecraft");
-        // Salva ao mudar
         manualPlatformCombo.setOnAction(e -> {
             settings.setLastManualPlatform(manualPlatformCombo.getValue());
             AppConfig.getInstance().save();
@@ -159,7 +199,7 @@ public class SidebarPanel extends VBox {
                     while (change.next()) {
                         if (change.wasAdded()) {
                             for (var r : change.getAddedSubList()) {
-                                if (isManualEntry(r.getUsername()))
+                                if (isManualEntry(r.getUsername(), r.getPlatform().displayName))
                                     updateOrAddMiniRow(r.getUsername(),
                                             r.getStatus().getDisplayName(),
                                             r.getPlatform().displayName);
@@ -168,7 +208,7 @@ public class SidebarPanel extends VBox {
                         if (change.wasReplaced()) {
                             for (int i = change.getFrom(); i < change.getTo(); i++) {
                                 var r = controller.getResults().get(i);
-                                if (isManualEntry(r.getUsername()))
+                                if (isManualEntry(r.getUsername(), r.getPlatform().displayName))
                                     updateOrAddMiniRow(r.getUsername(),
                                             r.getStatus().getDisplayName(),
                                             r.getPlatform().displayName);
@@ -180,16 +220,17 @@ public class SidebarPanel extends VBox {
         return tv;
     }
 
-    private boolean isManualEntry(String username) {
+    private boolean isManualEntry(String username, String platform) {
         return manualTable.getItems().stream()
-                .anyMatch(r -> r.nameProperty().get().equalsIgnoreCase(username));
+                .anyMatch(r -> r.nameProperty().get().equalsIgnoreCase(username)
+                        && r.platformProperty().get().equals(platform));
     }
 
     private void updateOrAddMiniRow(String username, String status, String platform) {
         for (ManualRow row : manualTable.getItems()) {
-            if (row.nameProperty().get().equalsIgnoreCase(username)) {
+            if (row.nameProperty().get().equalsIgnoreCase(username)
+                    && row.platformProperty().get().equals(platform)) {
                 row.statusProperty().set(status);
-                row.platformProperty().set(platform);
                 return;
             }
         }
@@ -223,49 +264,135 @@ public class SidebarPanel extends VBox {
         return wrapper;
     }
 
-    // ── Seções colapsáveis ─────────────────────────────────────────────
+    // ── Seção colapsável com drag & drop ───────────────────────────────
 
-    private VBox buildSections() {
-        VBox sections = new VBox(0);
-        ScrollPane scroll = new ScrollPane(sections);
-        scroll.setFitToWidth(true);
-        scroll.getStyleClass().add("af-scroll");
-        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        sections.getChildren().addAll(
-                buildCollapsibleSection("generation",  buildGenerationContent()),
-                buildCollapsibleSection("filters",     buildFiltersContent()),
-                buildCollapsibleSection("characters",  buildCharactersContent())
-        );
-        VBox wrapper = new VBox(scroll);
-        VBox.setVgrow(scroll, Priority.ALWAYS);
-        return wrapper;
-    }
-
-    private VBox buildCollapsibleSection(String title, VBox content) {
+    private VBox buildCollapsibleSection(String name, VBox content) {
         VBox section = new VBox(0);
         section.getStyleClass().add("af-collapsible");
+        section.setUserData(name);
+
         HBox header = new HBox(6);
         header.getStyleClass().add("af-collapsible-header");
         header.setPadding(new Insets(6, 10, 6, 10));
         header.setAlignment(Pos.CENTER_LEFT);
+
+        // Ícone de drag discreto — indica que é arrastável
+        Label dragHandle = new Label("⋮⋮");
+        dragHandle.setStyle(
+                "-fx-text-fill: #444444; -fx-font-size: 10px; -fx-padding: 0 4px 0 0;");
+        dragHandle.setTooltip(new Tooltip("Drag to reorder"));
+
         Label arrow = new Label("∨");
         arrow.getStyleClass().add("af-collapse-arrow");
-        Label titleLabel = new Label(title);
+
+        Label titleLabel = new Label(name);
         titleLabel.getStyleClass().add("af-collapsible-title");
+
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        header.getChildren().addAll(arrow, titleLabel, spacer);
+
+        header.getChildren().addAll(dragHandle, arrow, titleLabel, spacer);
+
+        // ── Colapsar ao clicar ─────────────────────────────────────────
         header.setOnMouseClicked(e -> {
-            boolean visible = content.isVisible();
-            content.setVisible(!visible);
-            content.setManaged(!visible);
-            arrow.setText(visible ? "›" : "∨");
+            // Ignora se foi um drag (pequena tolerância de movimento)
+            if (e.isStillSincePress()) {
+                boolean visible = content.isVisible();
+                content.setVisible(!visible);
+                content.setManaged(!visible);
+                arrow.setText(visible ? "›" : "∨");
+                settings.setSectionOpen(name, !visible);
+                AppConfig.getInstance().save();
+            }
         });
+
+        // ── Drag & Drop — SOURCE ───────────────────────────────────────
+        header.setOnDragDetected(e -> {
+            dragSourceName = name;
+            Dragboard db = header.startDragAndDrop(TransferMode.MOVE);
+            ClipboardContent cc = new ClipboardContent();
+            cc.putString(name); // payload = nome da seção
+            db.setContent(cc);
+
+            // Snapshot visual do header como imagem de drag
+            db.setDragView(header.snapshot(null, null), e.getX(), e.getY() / 2);
+            e.consume();
+        });
+
+        // ── Drag & Drop — TARGET ───────────────────────────────────────
+        header.setOnDragOver(e -> {
+            if (e.getGestureSource() != header &&
+                    e.getDragboard().hasString() &&
+                    !e.getDragboard().getString().equals(name)) {
+                e.acceptTransferModes(TransferMode.MOVE);
+                // Highlight visual na seção alvo
+                header.setStyle(HEADER_DRAG_OVER_STYLE);
+            }
+            e.consume();
+        });
+
+        header.setOnDragExited(e -> {
+            // Remove o highlight ao sair
+            header.setStyle("");
+            e.consume();
+        });
+
+        header.setOnDragDropped(e -> {
+            Dragboard db = e.getDragboard();
+            if (db.hasString()) {
+                String sourceName = db.getString();
+                String targetName = name;
+
+                if (!sourceName.equals(targetName)) {
+                    // Troca as posições na lista de ordem
+                    int srcIdx = sectionOrder.indexOf(sourceName);
+                    int tgtIdx = sectionOrder.indexOf(targetName);
+                    if (srcIdx >= 0 && tgtIdx >= 0) {
+                        sectionOrder.remove(srcIdx);
+                        sectionOrder.add(tgtIdx, sourceName);
+                        rebuildSectionsContainer();
+                        saveSectionOrder();
+                    }
+                }
+                e.setDropCompleted(true);
+            }
+            header.setStyle("");
+            e.consume();
+        });
+
+        header.setOnDragDone(e -> {
+            dragSourceName = null;
+            e.consume();
+        });
+
         section.getChildren().addAll(header, content);
         return section;
     }
 
-    // ── Generation ─────────────────────────────────────────────────────
+    // ── Reordenação ────────────────────────────────────────────────────
+
+    private void rebuildSectionsContainer() {
+        sectionsContainer.getChildren().clear();
+        for (String name : sectionOrder) {
+            sectionsContainer.getChildren().add(getSectionByName(name));
+        }
+    }
+
+    private VBox getSectionByName(String name) {
+        return switch (name) {
+            case "generation"  -> sectionGeneration;
+            case "filters"     -> sectionFilters;
+            case "characters"  -> sectionCharacters;
+            default            -> sectionGeneration;
+        };
+    }
+
+    private void saveSectionOrder() {
+        settings.setSidebarSectionOrder(sectionOrder.toArray(new String[0]));
+        AppConfig.getInstance().save();
+    }
+
+    // ── Generation content ─────────────────────────────────────────────
 
     private VBox buildGenerationContent() {
         VBox box = new VBox(8);
@@ -276,7 +403,6 @@ public class SidebarPanel extends VBox {
         minLenField   = buildNumberField("3");
         maxLenField   = buildNumberField("5");
 
-        // Salva ao sair dos campos
         quantityField.focusedProperty().addListener((obs, was, is) -> { if (!is) saveSettings(); });
         minLenField.focusedProperty().addListener((obs, was, is)   -> { if (!is) { validateMinMax(); saveSettings(); } });
         maxLenField.focusedProperty().addListener((obs, was, is)   -> { if (!is) { validateMinMax(); saveSettings(); } });
@@ -359,7 +485,7 @@ public class SidebarPanel extends VBox {
         maxLenField.setText(String.valueOf(max));
     }
 
-    // ── Filters ────────────────────────────────────────────────────────
+    // ── Filters content ────────────────────────────────────────────────
 
     private VBox buildFiltersContent() {
         VBox box = new VBox(8);
@@ -390,7 +516,7 @@ public class SidebarPanel extends VBox {
         return box;
     }
 
-    // ── Characters ─────────────────────────────────────────────────────
+    // ── Characters content ─────────────────────────────────────────────
 
     private VBox buildCharactersContent() {
         VBox box = new VBox(8);
@@ -418,7 +544,6 @@ public class SidebarPanel extends VBox {
 
     // ── Persistência ───────────────────────────────────────────────────
 
-    /** Carrega todas as configurações salvas nos controles da UI. */
     private void loadSettings() {
         // Geração
         isInfinite = settings.isLastInfinite();
@@ -457,11 +582,40 @@ public class SidebarPanel extends VBox {
         if (manualPlatformCombo.getItems().contains(lastManual)) {
             manualPlatformCombo.setValue(lastManual);
         }
+
+        // ── Ordem e estado das seções ──────────────────────────────────
+        String[] savedOrder = settings.getSidebarSectionOrder();
+        List<String> validNames =
+                new ArrayList<>(Arrays.asList("generation", "filters", "characters"));
+        sectionOrder.clear();
+        if (savedOrder != null) {
+            for (String name : savedOrder) {
+                if (validNames.remove(name)) sectionOrder.add(name);
+            }
+        }
+        sectionOrder.addAll(validNames); // garante que nenhuma seção seja perdida
+
+        // Aplica estado aberto/fechado
+        applyCollapseState(sectionGeneration, "generation");
+        applyCollapseState(sectionFilters,    "filters");
+        applyCollapseState(sectionCharacters, "characters");
+
+        // Monta o container na ordem correta
+        rebuildSectionsContainer();
     }
 
-    /** Salva o estado atual de todos os controles. */
+    private void applyCollapseState(VBox section, String name) {
+        if (section.getChildren().size() < 2) return;
+        boolean open = settings.isSectionOpen(name);
+        VBox content = (VBox) section.getChildren().get(1);
+        HBox header  = (HBox) section.getChildren().get(0);
+        Label arrow  = (Label) header.getChildren().get(1); // índice 1 — após o dragHandle
+        content.setVisible(open);
+        content.setManaged(open);
+        arrow.setText(open ? "∨" : "›");
+    }
+
     private void saveSettings() {
-        // Geração
         settings.setLastInfinite(isInfinite);
         settings.setLastQuantity(isInfinite ? 20 : parseField(quantityField, 20));
         settings.setLastMinLength(parseField(minLenField, 3));
@@ -470,7 +624,6 @@ public class SidebarPanel extends VBox {
         settings.setLastPlatform(algorithmPlatformCombo.getValue() != null
                 ? algorithmPlatformCombo.getValue() : "minecraft");
 
-        // Filtros
         settings.setFilterStartsWith(chkStartsWith.isSelected());
         settings.setFilterStartsWithVal(startsWith.getText());
         settings.setFilterEndsWith(chkEndsWith.isSelected());
@@ -478,13 +631,11 @@ public class SidebarPanel extends VBox {
         settings.setFilterContains(chkContains.isSelected());
         settings.setFilterContainsVal(contains.getText());
 
-        // Caracteres
         settings.setUseLetters(chkLetters.isSelected());
         settings.setUseNumbers(chkNumbers.isSelected());
         settings.setUseUnderscore(chkUnderscore.isSelected());
         settings.setUsePeriod(chkPeriod.isSelected());
 
-        // Manual
         settings.setLastManualPlatform(manualPlatformCombo.getValue() != null
                 ? manualPlatformCombo.getValue() : "minecraft");
 

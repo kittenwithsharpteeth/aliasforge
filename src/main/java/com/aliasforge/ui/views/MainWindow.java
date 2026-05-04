@@ -21,6 +21,7 @@ public class MainWindow extends BorderPane {
     private FavoritesView   favoritesView;
     private ApiSettingsView apiSettingsView;
     private LogsView        logsView;
+    private SettingsView    settingsView;
 
     public MainWindow(AppController controller) {
         this.controller = controller;
@@ -42,7 +43,8 @@ public class MainWindow extends BorderPane {
                 buildHistoryTab(),
                 buildFavoritesTab(),
                 buildApiSettingsTab(),
-                buildLogsTab()
+                buildLogsTab(),
+                buildSettingsTab()
         );
         return tabPane;
     }
@@ -104,6 +106,18 @@ public class MainWindow extends BorderPane {
         VBox.setVgrow(logsView, Priority.ALWAYS);
         Tab tab = new Tab("logs");
         tab.setContent(content);
+        return tab;
+    }
+
+    private Tab buildSettingsTab() {
+        settingsView = new SettingsView();
+        ScrollPane scroll = new ScrollPane(settingsView);
+        scroll.setFitToWidth(true);
+        scroll.setStyle("-fx-background-color: #1a1a1a; -fx-background: #1a1a1a;" +
+                "-fx-border-color: transparent;");
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        Tab tab = new Tab("settings");
+        tab.setContent(scroll);
         return tab;
     }
 

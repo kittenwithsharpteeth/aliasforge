@@ -11,12 +11,18 @@ import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.*;
+import javafx.stage.FileChooser;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class FavoritesView extends VBox {
 
-    private final AppController   controller;
+    private final AppController    controller;
     private TableView<FavoriteRow> table;
     private Label totalLabel, availableLabel, takenLabel;
     private ComboBox<String> platformCombo;
@@ -48,8 +54,13 @@ public class FavoritesView extends VBox {
 
         Label platformLbl = new Label("platform");
         platformLbl.getStyleClass().add("af-label-muted");
+
+        // Apenas plataformas reais do enum Platform
         platformCombo = new ComboBox<>();
-        platformCombo.getItems().addAll("all", "discord", "minecraft", "roblox", "instagram");
+        platformCombo.getItems().add("all");
+        for (Platform p : Platform.values()) {
+            platformCombo.getItems().add(p.displayName);
+        }
         platformCombo.setValue("all");
         platformCombo.getStyleClass().add("af-combo");
         platformCombo.setPrefWidth(110);
@@ -82,6 +93,8 @@ public class FavoritesView extends VBox {
             }
         });
 
+        btnExport.setOnAction(e -> exportCsv());
+
         bar.getChildren().addAll(platformLbl, platformCombo, searchLbl, searchField,
                 spacer, btnCopyAll, btnExport);
         return bar;
@@ -91,7 +104,9 @@ public class FavoritesView extends VBox {
         HBox bar = new HBox(6);
         bar.setPadding(new Insets(5, 10, 5, 10));
         bar.setAlignment(Pos.CENTER_LEFT);
-        bar.setStyle("-fx-background-color: #222222; -fx-border-color: transparent transparent #333333 transparent; -fx-border-width: 1px;");
+        bar.setStyle("-fx-background-color: #222222; " +
+                "-fx-border-color: transparent transparent #333333 transparent; " +
+                "-fx-border-width: 1px;");
 
         Button btnAll    = new Button("all");
         Button btnCopy   = new Button("copy to clipboard");
@@ -100,7 +115,8 @@ public class FavoritesView extends VBox {
         btnCopy.getStyleClass().add("af-btn");
         btnRemove.getStyleClass().add("af-btn");
 
-        btnAll.setOnAction(e -> table.getItems().forEach(r -> r.selectedProperty().set(true)));
+        btnAll.setOnAction(e ->
+                table.getItems().forEach(r -> r.selectedProperty().set(true)));
 
         btnCopy.setOnAction(e -> {
             String text = table.getItems().stream()
@@ -116,6 +132,7 @@ public class FavoritesView extends VBox {
 
         btnRemove.setOnAction(e -> table.getItems().stream()
                 .filter(r -> r.selectedProperty().get())
+                .collect(Collectors.toList()) // evita ConcurrentModification
                 .forEach(r -> controller.toggleFavorite(r.getUsername(), r.getPlatform())));
 
         Region spacer = new Region();
@@ -147,7 +164,9 @@ public class FavoritesView extends VBox {
         TableColumn<FavoriteRow, String> colStar = new TableColumn<>("★");
         colStar.setCellFactory(col -> new TableCell<>() {
             final Button btn = new Button("★");
-            { btn.setStyle("-fx-background-color: transparent; -fx-text-fill: #ffc107; -fx-font-size: 14px; -fx-cursor: hand; -fx-padding: 0 4px;");
+            {
+                btn.setStyle("-fx-background-color: transparent; -fx-text-fill: #ffc107;" +
+                        "-fx-font-size: 14px; -fx-cursor: hand; -fx-padding: 0 4px;");
                 btn.setOnAction(e -> {
                     FavoriteRow row = getTableView().getItems().get(getIndex());
                     controller.toggleFavorite(row.getUsername(), row.getPlatform());
@@ -213,7 +232,7 @@ public class FavoritesView extends VBox {
         String platformFilter = platformCombo.getValue();
         String search         = searchField.getText().toLowerCase().trim();
 
-        var filtered = controller.getFavorites().stream()
+        List<FavoriteRow> filtered = controller.getFavorites().stream()
                 .filter(r -> "all".equals(platformFilter) ||
                         r.getPlatform().displayName.equals(platformFilter))
                 .filter(r -> search.isEmpty() ||
@@ -225,12 +244,58 @@ public class FavoritesView extends VBox {
         updateStats(filtered);
     }
 
-    private void updateStats(java.util.List<FavoriteRow> rows) {
-        long avail = rows.stream().filter(r -> "available".equals(r.statusProperty().get())).count();
-        long taken = rows.stream().filter(r -> "taken".equals(r.statusProperty().get())).count();
+    private void updateStats(List<FavoriteRow> rows) {
+        long avail = rows.stream()
+                .filter(r -> "available".equals(r.statusProperty().get())).count();
+        long taken = rows.stream()
+                .filter(r -> "taken".equals(r.statusProperty().get())).count();
         totalLabel.setText("saved: " + rows.size());
         availableLabel.setText("available: " + avail);
         takenLabel.setText("taken: " + taken);
+    }
+
+    // ── Export CSV ─────────────────────────────────────────────────────
+
+    private void exportCsv() {
+        List<FavoriteRow> rows = table.getItems();
+        if (rows.isEmpty()) {
+            showAlert("Export CSV", "No favorites to export.");
+            return;
+        }
+
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Export Favorites as CSV");
+        chooser.setInitialFileName("aliasforge_favorites.csv");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
+
+        File file = chooser.showSaveDialog(getScene() != null ? getScene().getWindow() : null);
+        if (file == null) return;
+
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
+            bw.write("username,status,platform,saved_at");
+            bw.newLine();
+            for (FavoriteRow r : rows) {
+                bw.write(String.join(",",
+                        r.getUsername(),
+                        r.statusProperty().get(),
+                        r.platformProperty().get(),
+                        r.dateProperty().get()
+                ));
+                bw.newLine();
+            }
+            showAlert("Export Complete",
+                    "Favorites exported to:\n" + file.getAbsolutePath());
+        } catch (IOException e) {
+            showAlert("Export Error", "Failed to export: " + e.getMessage());
+        }
+    }
+
+    private void showAlert(String title, String msg) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION, msg, ButtonType.OK);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.showAndWait();
     }
 
     // ── FavoriteRow ────────────────────────────────────────────────────
@@ -259,6 +324,8 @@ public class FavoritesView extends VBox {
         public String          getUsername()      { return name.get(); }
         public Platform        getPlatform()      { return platformEnum; }
     }
+
+    // ── Cells ──────────────────────────────────────────────────────────
 
     private static class StatusCell extends TableCell<FavoriteRow, String> {
         @Override

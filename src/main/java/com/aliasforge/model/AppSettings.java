@@ -11,7 +11,7 @@ public class AppSettings {
     private int  requestTimeoutMs       = 8000;
     private int  parallelThreads        = 1;
     private int  maxRetries             = 3;
-    private int  retryDelaySeconds      = 60;
+    private int  retryDelaySeconds      = 30;
 
     // ── Notificações ───────────────────────────────────────────────────
     private boolean notifyOnAvailable   = false;
@@ -42,6 +42,14 @@ public class AppSettings {
     // ── Manual verifier ────────────────────────────────────────────────
     private String  lastManualPlatform  = "minecraft";
 
+    // ── Sidebar — seções (ordem e estado aberto/fechado) ───────────────
+    // Ordem: lista de nomes das seções na ordem desejada pelo usuário
+    private String[] sidebarSectionOrder    = {"generation", "filters", "characters"};
+    // Estado: true = aberto, false = fechado
+    private boolean  sectionGenerationOpen  = true;
+    private boolean  sectionFiltersOpen     = true;
+    private boolean  sectionCharactersOpen  = true;
+
     public AppSettings() {}
 
     // ── Getters e Setters — request ────────────────────────────────────
@@ -61,11 +69,11 @@ public class AppSettings {
     public int  getRetryDelaySeconds()           { return retryDelaySeconds; }
     public void setRetryDelaySeconds(int v)      { this.retryDelaySeconds = v; }
 
-    public boolean isNotifyOnAvailable()         { return notifyOnAvailable; }
+    public boolean isNotifyOnAvailable()          { return notifyOnAvailable; }
     public void    setNotifyOnAvailable(boolean v){ this.notifyOnAvailable = v; }
 
-    public boolean isMinimizeToTray()            { return minimizeToTray; }
-    public void    setMinimizeToTray(boolean v)  { this.minimizeToTray = v; }
+    public boolean isMinimizeToTray()             { return minimizeToTray; }
+    public void    setMinimizeToTray(boolean v)   { this.minimizeToTray = v; }
 
     // ── Getters e Setters — sidebar geração ───────────────────────────
 
@@ -89,23 +97,23 @@ public class AppSettings {
 
     // ── Getters e Setters — filtros ────────────────────────────────────
 
-    public boolean isFilterStartsWith()          { return filterStartsWith; }
-    public void    setFilterStartsWith(boolean v){ this.filterStartsWith = v; }
+    public boolean isFilterStartsWith()           { return filterStartsWith; }
+    public void    setFilterStartsWith(boolean v) { this.filterStartsWith = v; }
 
-    public String  getFilterStartsWithVal()      { return filterStartsWithVal; }
+    public String  getFilterStartsWithVal()       { return filterStartsWithVal; }
     public void    setFilterStartsWithVal(String v){ this.filterStartsWithVal = v; }
 
-    public boolean isFilterEndsWith()            { return filterEndsWith; }
-    public void    setFilterEndsWith(boolean v)  { this.filterEndsWith = v; }
+    public boolean isFilterEndsWith()             { return filterEndsWith; }
+    public void    setFilterEndsWith(boolean v)   { this.filterEndsWith = v; }
 
-    public String  getFilterEndsWithVal()        { return filterEndsWithVal; }
-    public void    setFilterEndsWithVal(String v){ this.filterEndsWithVal = v; }
+    public String  getFilterEndsWithVal()         { return filterEndsWithVal; }
+    public void    setFilterEndsWithVal(String v) { this.filterEndsWithVal = v; }
 
-    public boolean isFilterContains()            { return filterContains; }
-    public void    setFilterContains(boolean v)  { this.filterContains = v; }
+    public boolean isFilterContains()             { return filterContains; }
+    public void    setFilterContains(boolean v)   { this.filterContains = v; }
 
-    public String  getFilterContainsVal()        { return filterContainsVal; }
-    public void    setFilterContainsVal(String v){ this.filterContainsVal = v; }
+    public String  getFilterContainsVal()         { return filterContainsVal; }
+    public void    setFilterContainsVal(String v) { this.filterContainsVal = v; }
 
     // ── Getters e Setters — caracteres ────────────────────────────────
 
@@ -125,4 +133,42 @@ public class AppSettings {
 
     public String  getLastManualPlatform()        { return lastManualPlatform; }
     public void    setLastManualPlatform(String v){ this.lastManualPlatform = v; }
+
+    // ── Getters e Setters — sidebar seções ────────────────────────────
+
+    public String[] getSidebarSectionOrder() { return sidebarSectionOrder; }
+    public void     setSidebarSectionOrder(String[] v) { this.sidebarSectionOrder = v; }
+
+    public boolean isSectionGenerationOpen()          { return sectionGenerationOpen; }
+    public void    setSectionGenerationOpen(boolean v){ this.sectionGenerationOpen = v; }
+
+    public boolean isSectionFiltersOpen()             { return sectionFiltersOpen; }
+    public void    setSectionFiltersOpen(boolean v)   { this.sectionFiltersOpen = v; }
+
+    public boolean isSectionCharactersOpen()          { return sectionCharactersOpen; }
+    public void    setSectionCharactersOpen(boolean v){ this.sectionCharactersOpen = v; }
+
+    /**
+     * Retorna o estado aberto/fechado de uma seção pelo nome.
+     * Usado pelo SidebarPanel para carregar o estado salvo.
+     */
+    public boolean isSectionOpen(String name) {
+        return switch (name) {
+            case "generation"  -> sectionGenerationOpen;
+            case "filters"     -> sectionFiltersOpen;
+            case "characters"  -> sectionCharactersOpen;
+            default            -> true;
+        };
+    }
+
+    /**
+     * Salva o estado aberto/fechado de uma seção pelo nome.
+     */
+    public void setSectionOpen(String name, boolean open) {
+        switch (name) {
+            case "generation"  -> sectionGenerationOpen  = open;
+            case "filters"     -> sectionFiltersOpen     = open;
+            case "characters"  -> sectionCharactersOpen  = open;
+        }
+    }
 }

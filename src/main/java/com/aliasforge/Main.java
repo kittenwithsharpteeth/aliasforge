@@ -1,6 +1,7 @@
 package com.aliasforge;
 
 import atlantafx.base.theme.PrimerDark;
+import com.aliasforge.config.AppConfig;
 import com.aliasforge.ui.AppController;
 import com.aliasforge.ui.views.MainWindow;
 import com.aliasforge.util.SystemTrayService;
@@ -23,7 +24,6 @@ public class Main extends Application {
         Application.setUserAgentStylesheet(new PrimerDark().getUserAgentStylesheet());
         LOGGER.info("Starting AliasForge...");
 
-        // Permite que o app continue rodando sem janelas abertas
         Platform.setImplicitExit(false);
 
         AppController controller = new AppController();
@@ -71,35 +71,43 @@ public class Main extends Application {
                 () -> Platform.runLater(controller::resume)
         );
 
-        // ── Minimizar para bandeja ─────────────────────────────────────
+        // ── Minimizar para bandeja (respeita a preferência do usuário) ─
         stage.iconifiedProperty().addListener((obs, wasMin, isMin) -> {
             if (isMin && tray.isInstalled()) {
-                Platform.runLater(() -> {
-                    stage.hide();
-                    // Notificação única ao minimizar pela primeira vez
-                    tray.showMessage(
-                            "AliasForge is running in the background",
-                            "Double-click the tray icon to restore."
-                    );
-                });
+                boolean minimizeToTray = AppConfig.getInstance()
+                        .getSettings().isMinimizeToTray();
+                if (minimizeToTray) {
+                    Platform.runLater(() -> {
+                        stage.hide();
+                        tray.showMessage(
+                                "AliasForge is running in the background",
+                                "Double-click the tray icon to restore."
+                        );
+                    });
+                }
+                // Se minimizeToTray=false, deixa minimizar normalmente na taskbar
             }
         });
 
-        // ── Fechar janela (X) → vai para bandeja ───────────────────────
+        // ── Fechar janela (X) — respeita a preferência do usuário ──────
         stage.setOnCloseRequest(e -> {
             e.consume();
-            if (tray.isInstalled()) {
+            boolean minimizeToTray = AppConfig.getInstance()
+                    .getSettings().isMinimizeToTray();
+
+            if (tray.isInstalled() && minimizeToTray) {
+                // Vai para a bandeja
                 stage.hide();
-                // Notificação ao fechar pela primeira vez
                 tray.showMessage(
                         "AliasForge is running in the background",
                         "Double-click the tray icon to restore.\n" +
                                 "Right-click the icon to exit completely."
                 );
             } else {
-                // Sem bandeja — encerra normalmente
-                LOGGER.info("Shutting down (no tray).");
+                // Encerra normalmente — tray desabilitado ou sem suporte
+                LOGGER.info("Shutting down.");
                 controller.stop();
+                tray.uninstall();
                 Platform.exit();
                 System.exit(0);
             }

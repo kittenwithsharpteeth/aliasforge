@@ -1,5 +1,7 @@
 package com.aliasforge.core.queue;
 
+import com.aliasforge.config.AppConfig;
+import com.aliasforge.model.AppSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,20 +15,15 @@ import java.util.function.Consumer;
  *
  * Comportamento:
  * - Rate limit → entra na fila, agenda retry
- * - Retry 1: espera 30s
- * - Retry 2: espera 60s
- * - Retry 3: espera 120s
- * - Após 3 falhas → vira error com origin "logs" e passa pro próximo
+ * - Delay por tentativa: base, base×2, base×3, ...
+ * - Max retries e delay base lidos de AppSettings em runtime
+ * - Após esgotar retries → vira error
  *
  * O mesmo username NÃO acumula múltiplas entradas na fila.
  */
 public class RateLimitHandler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RateLimitHandler.class);
-
-    // Delays para cada retry (em segundos)
-    private static final int[] RETRY_DELAYS = {30, 60, 120};
-    private static final int   MAX_RETRIES  = 3;
 
     private final ScheduledExecutorService scheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -53,36 +50,39 @@ public class RateLimitHandler {
      * - Se esgotou: chama onRetryExhausted (vira error)
      */
     public synchronized void handleRateLimit(CheckTask task) {
+        AppSettings settings  = AppConfig.getInstance().getSettings();
+        int maxRetries        = settings.getMaxRetries();
+        int baseDelaySeconds  = settings.getRetryDelaySeconds();
+
         int currentRetry = retryQueue.getOrDefault(task.getUsername(), 0);
 
-        if (currentRetry >= MAX_RETRIES) {
-            // Esgotou — remove da fila e notifica como error
+        if (currentRetry >= maxRetries) {
             retryQueue.remove(task.getUsername());
             LOGGER.warn("'{}' exhausted {} retries → marking as error",
-                    task.getUsername(), MAX_RETRIES);
+                    task.getUsername(), maxRetries);
             onRetryExhausted.accept(task);
             return;
         }
 
-        // Incrementa contador e agenda retry
-        int nextRetry = currentRetry + 1;
+        int nextRetry    = currentRetry + 1;
+        // Delay cresce linearmente: base, base×2, base×3, ...
+        int delaySeconds = baseDelaySeconds * nextRetry;
+
         retryQueue.put(task.getUsername(), nextRetry);
 
-        int delaySeconds = RETRY_DELAYS[currentRetry]; // 30s, 60s, 120s
         LOGGER.info("Rate limit '{}' → retry {}/{} in {}s",
-                task.getUsername(), nextRetry, MAX_RETRIES, delaySeconds);
+                task.getUsername(), nextRetry, maxRetries, delaySeconds);
 
         CheckTask retryTask = task.withRetry();
 
         scheduler.schedule(() -> {
             synchronized (this) {
-                // Só remove se não foi atualizado para um retry ainda maior
                 if (retryQueue.getOrDefault(task.getUsername(), 0) == nextRetry) {
                     retryQueue.remove(task.getUsername());
                 }
             }
             LOGGER.info("Retrying '{}' (attempt {}/{})",
-                    task.getUsername(), nextRetry, MAX_RETRIES);
+                    task.getUsername(), nextRetry, maxRetries);
             onRetryReady.accept(retryTask);
         }, delaySeconds, TimeUnit.SECONDS);
     }

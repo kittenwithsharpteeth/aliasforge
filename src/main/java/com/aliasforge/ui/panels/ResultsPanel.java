@@ -1,5 +1,6 @@
 package com.aliasforge.ui.panels;
 
+import com.aliasforge.model.CheckStatus;
 import com.aliasforge.model.Platform;
 import com.aliasforge.model.UsernameResult;
 import com.aliasforge.ui.AppController;
@@ -84,7 +85,7 @@ public class ResultsPanel extends VBox {
             if (!text.isEmpty()) copyToClipboard(text);
         });
 
-        // Re-check selecionados
+        // Re-check selecionados — reseta status para "checking" imediatamente
         btnRecheck.setOnAction(e -> {
             List<ResultRow> selected = table.getItems().stream()
                     .filter(r -> r.selectedProperty().get())
@@ -94,8 +95,15 @@ public class ResultsPanel extends VBox {
                 return;
             }
             selected.forEach(r -> {
+                // Fix: reseta o status visual imediatamente para não confundir o usuário
+                r.statusProperty().set(CheckStatus.CHECKING.getDisplayName());
+                r.timeProperty().set("");
+                r.originProperty().set("");
+                // Enfileira o re-check no backend
                 controller.addManualTask(r.getUsername(), r.getPlatform());
             });
+            // Força refresh do filtro para refletir a mudança
+            refreshTableView();
         });
 
         // Favoritar selecionados
@@ -171,9 +179,6 @@ public class ResultsPanel extends VBox {
 
     // ── Filtro e busca ─────────────────────────────────────────────────
 
-    /**
-     * Chamado pelo MainWindow quando o filtro ou busca da toolbar mudam.
-     */
     public void applyFilter(String filter, String search) {
         this.currentFilter = filter;
         this.currentSearch = search;
@@ -182,8 +187,8 @@ public class ResultsPanel extends VBox {
 
     private void refreshTableView() {
         List<ResultRow> visible = allRows.stream()
-                .filter(r -> matchesFilter(r))
-                .filter(r -> matchesSearch(r))
+                .filter(this::matchesFilter)
+                .filter(this::matchesSearch)
                 .collect(Collectors.toList());
         table.getItems().setAll(visible);
     }
@@ -221,18 +226,19 @@ public class ResultsPanel extends VBox {
     }
 
     private void updateOrAdd(UsernameResult result) {
-        // Atualiza na lista mestre
+        // Fix: busca por username E platform para evitar falsa dedup entre plataformas
         for (int i = 0; i < allRows.size(); i++) {
-            if (allRows.get(i).getUsername().equalsIgnoreCase(result.getUsername())) {
-                allRows.get(i).update(result);
+            ResultRow row = allRows.get(i);
+            if (row.getUsername().equalsIgnoreCase(result.getUsername()) &&
+                    row.getPlatform() == result.getPlatform()) {
+                row.update(result);
                 refreshTableView();
                 return;
             }
         }
-        // Novo resultado — adiciona na lista mestre
+        // Novo resultado
         ResultRow newRow = new ResultRow(result);
         allRows.add(newRow);
-        // Adiciona na tabela só se passa pelo filtro
         if (matchesFilter(newRow) && matchesSearch(newRow)) {
             table.getItems().add(newRow);
             int last = table.getItems().size() - 1;
