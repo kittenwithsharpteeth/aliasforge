@@ -1,24 +1,43 @@
 package com.aliasforge.core.api;
 
+import com.aliasforge.config.AppConfig;
 import com.aliasforge.model.Platform;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.util.stream.Collectors;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 
 /**
  * guns.lol — verificação via GET no perfil público.
- * GET https://guns.lol/{username}
- * 200 = taken, 404 = available.
- * Fallback: scraping procura por indicadores de perfil inexistente no HTML.
+ *
+ * Problema: guns.lol usa HTTP/2 e retorna 307 Temporary Redirect via
+ * HTTP/2 PUSH_PROMISE, que o HttpClient com followRedirects(ALWAYS)
+ * não segue automaticamente quando em modo HTTP/2.
+ *
+ * Fix: forçar HTTP_1_1 no HttpClient. Com HTTP/1.1, o 307 é um
+ * redirect normal que followRedirects(ALWAYS) segue corretamente.
+ *
+ * Lógica após o redirect:
+ * - 200 + perfil real  → taken
+ * - 200 + erro inline  → available (scraping)
+ * - 404               → available
+ * - 429               → rate limit
  */
 public class GunsLolApi extends AbstractPlatformApi {
 
     private static final String ENDPOINT = "https://guns.lol/";
 
+    // HTTP_1_1 obrigatório — HTTP/2 quebra o follow redirect do 307
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .followRedirects(HttpClient.Redirect.ALWAYS)
+            .connectTimeout(Duration.ofSeconds(12))
+            .build();
+
     @Override public Platform getPlatform()          { return Platform.GUNS_LOL; }
-    @Override public int      getRecommendedDelayMs(){ return 800; }
+    @Override public int      getRecommendedDelayMs(){ return 1000; }
 
     @Override
     protected String buildUrl(String username) { return ENDPOINT + username; }
@@ -33,34 +52,61 @@ public class GunsLolApi extends AbstractPlatformApi {
         };
     }
 
-    /**
-     * Override completo para adicionar fallback de scraping quando o status
-     * code não é conclusivo (ex: sempre retorna 200 com página de erro inline).
-     */
     @Override
     public CheckResult check(String username) {
         if (!isValidUsername(username)) return CheckResult.error("invalid username format");
 
+        int timeout = Math.max(
+                AppConfig.getInstance().getSettings().getRequestTimeoutMs(), 12_000);
+
         long start = System.currentTimeMillis();
         try {
-            HttpURLConnection conn = openConnection(buildUrl(username));
-            int  code = conn.getResponseCode();
-            long ms   = System.currentTimeMillis() - start;
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(ENDPOINT + username))
+                    .timeout(Duration.ofMillis(timeout))
+                    .header("User-Agent",
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                                    "Chrome/124.0.0.0 Safari/537.36")
+                    .header("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .GET()
+                    .build();
 
-            if (code == 404) { conn.disconnect(); return CheckResult.available(ms); }
-            if (code == 429) { conn.disconnect(); return CheckResult.rateLimit(); }
-            if (code != 200) { conn.disconnect(); return CheckResult.error("http " + code); }
+            HttpResponse<String> response = HTTP_CLIENT.send(
+                    request, HttpResponse.BodyHandlers.ofString());
 
-            // Fallback: lê o HTML para confirmar se o perfil existe
-            String body = new BufferedReader(new InputStreamReader(conn.getInputStream()))
-                    .lines().collect(Collectors.joining("\n"));
-            conn.disconnect();
+            int    code = response.statusCode();
+            long   ms   = System.currentTimeMillis() - start;
+            String body = response.body();
 
-            // guns.lol retorna página com "User not found" ou similar quando indisponível
-            if (containsNotFound(body)) return CheckResult.available(ms);
-            return CheckResult.taken(ms);
+            LOGGER.debug("guns.lol username={} http={} time={}ms finalUrl={}",
+                    username, code, ms, response.uri());
 
-        } catch (java.net.SocketTimeoutException e) {
+            if (code == 404) return CheckResult.available(ms);
+            if (code == 429) return CheckResult.rateLimit();
+
+            // Ainda recebeu 307 mesmo com HTTP/1.1 — não deveria acontecer,
+            // mas como fallback seguro marca como error
+            if (code == 307 || code == 301 || code == 302) {
+                LOGGER.warn("guns.lol: unexpected redirect {} for '{}' to {}",
+                        code, username,
+                        response.headers().firstValue("location").orElse("unknown"));
+                return CheckResult.error("unexpected redirect " + code);
+            }
+
+            if (code != 200) return CheckResult.error("http " + code);
+
+            // 200 — verifica se é perfil real ou página de erro inline
+            if (isNotFoundPage(body)) return CheckResult.available(ms);
+            if (isRealProfile(body, username)) return CheckResult.taken(ms);
+
+            // Ambíguo — conservador, não marca como available
+            LOGGER.warn("guns.lol: ambiguous response for '{}' ({}chars body)",
+                    username, body == null ? 0 : body.length());
+            return CheckResult.error("could not determine — try manual check");
+
+        } catch (java.net.http.HttpTimeoutException e) {
             return CheckResult.rateLimit();
         } catch (Exception e) {
             LOGGER.error("Error checking '{}' on guns.lol: {}", username, e.getMessage());
@@ -68,13 +114,24 @@ public class GunsLolApi extends AbstractPlatformApi {
         }
     }
 
-    private boolean containsNotFound(String html) {
+    private boolean isNotFoundPage(String html) {
         if (html == null) return false;
         String lower = html.toLowerCase();
-        return lower.contains("user not found")
-                || lower.contains("page not found")
-                || lower.contains("does not exist")
-                || lower.contains("404");
+        return lower.contains("user not found") ||
+                lower.contains("page not found") ||
+                lower.contains("does not exist") ||
+                lower.contains("no user found") ||
+                lower.contains("class=\"error\"") ||
+                lower.contains("id=\"error\"");
+    }
+
+    private boolean isRealProfile(String html, String username) {
+        if (html == null) return false;
+        String lower = html.toLowerCase();
+        return (lower.contains("og:title") && lower.contains(username.toLowerCase())) ||
+                (lower.contains("og:image") && lower.contains("guns.lol")) ||
+                lower.contains("\"username\"") ||
+                (lower.contains("avatar") && lower.contains("bio"));
     }
 
     @Override

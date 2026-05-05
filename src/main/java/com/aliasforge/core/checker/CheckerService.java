@@ -18,10 +18,9 @@ import java.util.function.Consumer;
 /**
  * Serviço principal que orquestra NameGenerator + CheckerQueue.
  *
- * Correções no modo infinito:
- * - infinitePaused: impede injeção de novos batches enquanto pausado
- * - pause/resume/stop respeitam o estado infinito corretamente
- * - watcher verifica infinitePaused antes de injetar
+ * Fix: manualQueue é completamente separada da mainQueue.
+ * O manual verifier funciona independentemente do estado do algoritmo principal
+ * (rodando, pausado ou parado).
  */
 public class CheckerService {
 
@@ -34,8 +33,13 @@ public class CheckerService {
     private final Consumer<CheckerQueue.CheckerStats> onStats;
     private final Runnable                            onCompleted;
 
-    private CheckerQueue             currentQueue;
+    // ── Queue principal (algoritmo) ────────────────────────────────────
+    private CheckerQueue             mainQueue;
     private ScheduledExecutorService infiniteScheduler;
+
+    // ── Queue exclusiva do manual verifier ─────────────────────────────
+    // Completamente independente — não é afetada por pause/stop do algoritmo
+    private CheckerQueue manualQueue;
 
     // Estado do modo infinito
     private final AtomicBoolean infiniteRunning = new AtomicBoolean(false);
@@ -50,12 +54,16 @@ public class CheckerService {
         this.onResult    = onResult;
         this.onStats     = onStats;
         this.onCompleted = onCompleted;
+
+        // A manualQueue é criada uma vez e nunca destruída
+        // — persiste durante toda a vida do serviço
+        this.manualQueue = new CheckerQueue(onResult, onStats, null);
     }
 
-    // ── Controle ───────────────────────────────────────────────────────
+    // ── Controle do algoritmo principal ───────────────────────────────
 
     public void start(GeneratorConfig config) {
-        stopAndDiscard();
+        stopMainQueue(); // Para apenas o algoritmo, NÃO a manualQueue
 
         if (config.isInfinite()) {
             startInfinite(config);
@@ -72,10 +80,10 @@ public class CheckerService {
         }
         LOGGER.info("Starting finite checker: {} usernames on {}",
                 usernames.size(), config.getPlatform());
-        currentQueue = new CheckerQueue(onResult, onStats, () -> {
+        mainQueue = new CheckerQueue(onResult, onStats, () -> {
             if (onCompleted != null) onCompleted.run();
         });
-        currentQueue.start(usernames, config.getPlatform());
+        mainQueue.start(usernames, config.getPlatform());
     }
 
     private void startInfinite(GeneratorConfig config) {
@@ -85,22 +93,18 @@ public class CheckerService {
 
         LOGGER.info("Starting infinite checker on {}", config.getPlatform());
 
-        // Queue com callback de ciclo concluído
-        currentQueue = new CheckerQueue(onResult, onStats, () -> {
-            // Só injeta próximo batch se não pausado e ainda rodando
+        mainQueue = new CheckerQueue(onResult, onStats, () -> {
             if (infiniteRunning.get() && !infinitePaused.get()) {
                 LOGGER.debug("Infinite: batch complete, injecting next batch");
                 injectNextBatch();
             }
         });
 
-        // Injeta primeiro batch e inicia a queue
         List<String> firstBatch = generateBatch();
         if (!firstBatch.isEmpty()) {
-            currentQueue.start(firstBatch, infiniteConfig.getPlatform());
+            mainQueue.start(firstBatch, infiniteConfig.getPlatform());
         }
 
-        // Watcher de segurança: detecta se a queue travou sem disparar o callback
         infiniteScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "aliasforge-infinite-watcher");
             t.setDaemon(true);
@@ -108,24 +112,21 @@ public class CheckerService {
         });
 
         infiniteScheduler.scheduleAtFixedRate(() -> {
-            // Não injeta se pausado, parado ou já rodando normalmente
             if (!infiniteRunning.get() || infinitePaused.get()) return;
-            if (currentQueue == null) return;
-            if (currentQueue.isRunning() || currentQueue.isPaused()) return;
-
-            // Queue ociosa sem ter sido sinalizada — injeta próximo batch
+            if (mainQueue == null) return;
+            if (mainQueue.isRunning() || mainQueue.isPaused()) return;
             LOGGER.debug("Infinite watcher: queue idle, injecting next batch");
             injectNextBatch();
         }, 3, 3, TimeUnit.SECONDS);
     }
 
     private void injectNextBatch() {
-        if (!infiniteRunning.get() || infinitePaused.get() || currentQueue == null) return;
+        if (!infiniteRunning.get() || infinitePaused.get() || mainQueue == null) return;
         List<String> batch = generateBatch();
         if (batch.isEmpty()) return;
         LOGGER.info("Infinite mode: injecting {} usernames", batch.size());
         for (String u : batch) {
-            currentQueue.addManualTask(u, infiniteConfig.getPlatform());
+            mainQueue.addManualTask(u, infiniteConfig.getPlatform());
         }
     }
 
@@ -134,57 +135,63 @@ public class CheckerService {
         return generator.generate(c);
     }
 
-    // ── Pause / Resume / Stop ──────────────────────────────────────────
+    // ── Pause / Resume / Stop do algoritmo ────────────────────────────
+    // Nenhum desses métodos toca a manualQueue
 
     public void pause() {
         if (infiniteRunning.get()) {
-            // Modo infinito: marca infinitePaused para bloquear injeção de novos batches
             infinitePaused.set(true);
             LOGGER.info("Infinite mode paused — no new batches will be injected.");
         }
-        if (currentQueue != null) currentQueue.pause();
+        if (mainQueue != null) mainQueue.pause();
     }
 
     public void resume() {
         if (infiniteRunning.get()) {
             infinitePaused.set(false);
             LOGGER.info("Infinite mode resumed.");
-            // Se a queue esvaziou enquanto estava pausado, injeta novo batch
-            if (currentQueue != null && !currentQueue.isRunning()) {
+            if (mainQueue != null && !mainQueue.isRunning()) {
                 injectNextBatch();
             }
         }
-        if (currentQueue != null) currentQueue.resume();
+        if (mainQueue != null) mainQueue.resume();
     }
 
     public void stop() {
-        stopAndDiscard();
+        stopMainQueue();
     }
 
-    // ── Manual ─────────────────────────────────────────────────────────
+    // ── Manual verifier — queue independente ──────────────────────────
 
-    public void startManual(List<String> usernames, Platform platform) {
-        stopAndDiscard();
-        LOGGER.info("Starting manual check: {} usernames on {}", usernames.size(), platform);
-        currentQueue = new CheckerQueue(onResult, onStats, onCompleted);
-        currentQueue.start(usernames, platform);
-    }
-
+    /**
+     * Adiciona uma task ao manual verifier.
+     * Funciona independentemente do estado do algoritmo principal.
+     * A manualQueue nunca é pausada ou parada pelo algoritmo.
+     */
     public void addManual(String username, Platform platform) {
-        if (currentQueue == null || (!currentQueue.isRunning() && !currentQueue.isPaused())) {
-            currentQueue = new CheckerQueue(onResult, onStats, null);
+        manualQueue.addManualTask(username, platform);
+        LOGGER.debug("Manual task added: {} on {}", username, platform);
+    }
+
+    /**
+     * Inicia uma verificação manual em lote.
+     * Também usa a manualQueue — não interfere com o algoritmo.
+     */
+    public void startManual(List<String> usernames, Platform platform) {
+        LOGGER.info("Starting manual batch: {} usernames on {}", usernames.size(), platform);
+        for (String u : usernames) {
+            manualQueue.addManualTask(u, platform);
         }
-        currentQueue.addManualTask(username, platform);
     }
 
     // ── Estado ─────────────────────────────────────────────────────────
 
     public boolean isRunning() {
-        return currentQueue != null && currentQueue.isRunning();
+        return mainQueue != null && mainQueue.isRunning();
     }
 
     public boolean isPaused() {
-        return currentQueue != null && currentQueue.isPaused();
+        return mainQueue != null && mainQueue.isPaused();
     }
 
     public boolean isInfiniteMode() {
@@ -193,8 +200,11 @@ public class CheckerService {
 
     // ── Interno ────────────────────────────────────────────────────────
 
-    private void stopAndDiscard() {
-        // Para o modo infinito completamente
+    /**
+     * Para apenas o algoritmo principal.
+     * A manualQueue continua rodando normalmente.
+     */
+    private void stopMainQueue() {
         infiniteRunning.set(false);
         infinitePaused.set(false);
         infiniteConfig = null;
@@ -203,9 +213,20 @@ public class CheckerService {
             infiniteScheduler.shutdownNow();
             infiniteScheduler = null;
         }
-        if (currentQueue != null) {
-            currentQueue.stop();
-            currentQueue = null;
+        if (mainQueue != null) {
+            mainQueue.stop();
+            mainQueue = null;
+        }
+    }
+
+    /**
+     * Para tudo — incluindo a manualQueue.
+     * Chamado apenas ao encerrar o app.
+     */
+    public void stopAll() {
+        stopMainQueue();
+        if (manualQueue != null) {
+            manualQueue.stop();
         }
     }
 

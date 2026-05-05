@@ -5,31 +5,37 @@ import com.aliasforge.model.Platform;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.stream.Collectors;
 
 /**
- * TikTok — verificação via GET no perfil público.
- * GET https://www.tiktok.com/@{username}
+ * TikTok — verificação via endpoint interno + scraping robusto.
  *
- * TikTok sempre retorna 200 (SPA), então scraping é obrigatório.
- * Indicadores de "não existe": título genérico, meta tags de erro,
- * ou ausência do username no og:title.
+ * Estratégia em camadas:
+ * 1. GET https://www.tiktok.com/api/user/detail/?uniqueId={username}
+ *    → JSON interno: statusCode 0 = exists, 10202 = not found
+ * 2. Fallback: GET https://www.tiktok.com/@{username}
+ *    → scraping do HTML procurando por "followers"/"following" (perfil real)
+ *    ou indicadores de "não encontrado"
  *
- * Delay alto (2000ms) para evitar bloqueio por bot detection.
+ * TikTok bloqueia facilmente — delay alto (2500ms) e User-Agent realista.
  */
 public class TikTokApi extends AbstractPlatformApi {
 
-    private static final String ENDPOINT = "https://www.tiktok.com/@";
+    private static final String API_ENDPOINT  =
+            "https://www.tiktok.com/api/user/detail/?uniqueId=";
+    private static final String HTML_ENDPOINT = "https://www.tiktok.com/@";
 
     @Override public Platform getPlatform()          { return Platform.TIKTOK; }
-    @Override public int      getRecommendedDelayMs(){ return 2000; }
+    @Override public int      getRecommendedDelayMs(){ return 2500; }
 
     @Override
-    protected String buildUrl(String username) { return ENDPOINT + username; }
+    protected String buildUrl(String username) {
+        return HTML_ENDPOINT + username;
+    }
 
     @Override
     protected CheckResult interpretResponse(int code, long ms) {
-        // TikTok raramente retorna 404 — usado só como fallback rápido
         return switch (code) {
             case 404      -> CheckResult.available(ms);
             case 429      -> CheckResult.rateLimit();
@@ -41,14 +47,93 @@ public class TikTokApi extends AbstractPlatformApi {
     public CheckResult check(String username) {
         if (!isValidUsername(username)) return CheckResult.error("invalid username format");
 
+        // ── Tentativa 1: endpoint JSON interno ─────────────────────────
+        CheckResult apiResult = tryApiEndpoint(username);
+        if (apiResult != null) return apiResult;
+
+        // ── Tentativa 2: scraping do HTML ──────────────────────────────
+        return tryHtmlScraping(username);
+    }
+
+    /**
+     * Tenta o endpoint JSON interno do TikTok.
+     * Retorna null se não for possível determinar com segurança.
+     */
+    private CheckResult tryApiEndpoint(String username) {
         long start = System.currentTimeMillis();
         try {
-            HttpURLConnection conn = openConnection(buildUrl(username));
-            // TikTok exige User-Agent mais realista para não bloquear
+            URL url = new URL(API_ENDPOINT + username);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(12_000);
+            conn.setReadTimeout(12_000);
+            conn.setInstanceFollowRedirects(true);
+
+            // Headers que imitam o browser para não ser bloqueado
             conn.setRequestProperty("User-Agent",
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                             "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                            "Chrome/120.0.0.0 Safari/537.36");
+                            "Chrome/124.0.0.0 Safari/537.36");
+            conn.setRequestProperty("Accept", "application/json, text/plain, */*");
+            conn.setRequestProperty("Accept-Language", "en-US,en;q=0.9");
+            conn.setRequestProperty("Referer", "https://www.tiktok.com/");
+            conn.setRequestProperty("sec-fetch-site", "same-origin");
+
+            int  code = conn.getResponseCode();
+            long ms   = System.currentTimeMillis() - start;
+
+            if (code == 429) { conn.disconnect(); return CheckResult.rateLimit(); }
+
+            // Se não retornou 200, não conseguimos usar este endpoint
+            if (code != 200) { conn.disconnect(); return null; }
+
+            String body = new BufferedReader(new InputStreamReader(conn.getInputStream()))
+                    .lines().collect(Collectors.joining());
+            conn.disconnect();
+
+            // TikTok API interna: statusCode 0 = usuário existe, 10202 = não existe
+            if (body.contains("\"statusCode\":0") || body.contains("\"status_code\":0")) {
+                // Confirma que tem userInfo real no JSON
+                if (body.contains("\"userInfo\"") || body.contains("\"uniqueId\"")) {
+                    return CheckResult.taken(ms);
+                }
+            }
+            if (body.contains("\"statusCode\":10202") ||
+                    body.contains("\"status_code\":10202") ||
+                    body.contains("\"statusCode\":10221")) {
+                return CheckResult.available(ms);
+            }
+
+            // Não conseguiu determinar — cai no scraping HTML
+            return null;
+
+        } catch (java.net.SocketTimeoutException e) {
+            return CheckResult.rateLimit();
+        } catch (Exception e) {
+            LOGGER.warn("TikTok API endpoint failed for '{}': {}", username, e.getMessage());
+            return null; // Cai no fallback HTML
+        }
+    }
+
+    /**
+     * Fallback: faz scraping do HTML da página de perfil.
+     * Procura por indicadores concretos de perfil real vs. página de erro.
+     */
+    private CheckResult tryHtmlScraping(String username) {
+        long start = System.currentTimeMillis();
+        try {
+            URL url = new URL(HTML_ENDPOINT + username);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(12_000);
+            conn.setReadTimeout(12_000);
+            conn.setInstanceFollowRedirects(true);
+            conn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                            "Chrome/124.0.0.0 Safari/537.36");
+            conn.setRequestProperty("Accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
             conn.setRequestProperty("Accept-Language", "en-US,en;q=0.9");
 
             int  code = conn.getResponseCode();
@@ -56,42 +141,86 @@ public class TikTokApi extends AbstractPlatformApi {
 
             if (code == 404) { conn.disconnect(); return CheckResult.available(ms); }
             if (code == 429) { conn.disconnect(); return CheckResult.rateLimit(); }
-
-            // TikTok retorna 200 mesmo para perfis inexistentes — scraping obrigatório
             if (code != 200) { conn.disconnect(); return CheckResult.error("http " + code); }
 
+            // Lê as primeiras 120 linhas — suficiente para o <head> e meta tags
             String body = new BufferedReader(new InputStreamReader(conn.getInputStream()))
-                    .lines().limit(80) // lê só as primeiras 80 linhas (head do HTML)
+                    .lines().limit(120)
                     .collect(Collectors.joining("\n"));
             conn.disconnect();
 
-            if (profileNotFound(body, username)) return CheckResult.available(ms);
-            return CheckResult.taken(ms);
+            return classifyHtml(body, username, ms);
 
         } catch (java.net.SocketTimeoutException e) {
             return CheckResult.rateLimit();
         } catch (Exception e) {
-            LOGGER.error("Error checking '{}' on TikTok: {}", username, e.getMessage());
+            LOGGER.error("TikTok HTML scraping failed for '{}': {}", username, e.getMessage());
             return CheckResult.error(e.getMessage());
         }
     }
 
-    private boolean profileNotFound(String html, String username) {
-        if (html == null) return false;
+    /**
+     * Classifica o HTML retornado.
+     *
+     * Indicadores POSITIVOS (perfil existe):
+     * - "followers" ou "following" no head/meta (contagens reais)
+     * - og:title contém o username ou "@"
+     * - "userInfo" no JSON embutido
+     * - "__UNIVERSAL_DATA_FOR_REHYDRATION__" com dados do usuário
+     *
+     * Indicadores NEGATIVOS (perfil não existe):
+     * - "Couldn't find this account"
+     * - "statusCode\":10202"
+     * - og:title é só "TikTok" sem username
+     * - "noindex" sem dados de usuário
+     */
+    private CheckResult classifyHtml(String html, String username, long ms) {
+        if (html == null || html.isEmpty()) return CheckResult.error("empty response");
+
         String lower = html.toLowerCase();
+        String lowerUser = username.toLowerCase();
 
-        // Página de erro: título genérico sem o username
-        boolean hasUsername = lower.contains("@" + username.toLowerCase())
-                || lower.contains("\"" + username.toLowerCase() + "\"");
+        // ── Indicadores negativos fortes ───────────────────────────────
+        if (lower.contains("couldn't find this account") ||
+                lower.contains("could not find this account") ||
+                lower.contains("\"statuscode\":10202") ||
+                lower.contains("\"status_code\":10202") ||
+                lower.contains("page not available") ||
+                lower.contains("this account doesn't exist")) {
+            return CheckResult.available(ms);
+        }
 
-        // Indicadores de "não encontrado"
-        boolean hasNotFound = lower.contains("couldn't find this account")
-                || lower.contains("page not found")
-                || lower.contains("user not found")
-                || lower.contains("\"statuscode\":10202") // API interna de erro
-                || lower.contains("noindex");             // perfis inexistentes recebem noindex
+        // ── Indicadores positivos fortes ───────────────────────────────
+        // og:title com o username é o sinal mais confiável
+        if (lower.contains("og:title") &&
+                (lower.contains("@" + lowerUser) || lower.contains(lowerUser + " (@"))) {
+            return CheckResult.taken(ms);
+        }
 
-        return hasNotFound || !hasUsername;
+        // JSON embutido com dados reais do usuário
+        if (lower.contains("\"uniqueid\":\"" + lowerUser + "\"") ||
+                lower.contains("\"nickname\"") && lower.contains("\"followercount\"")) {
+            return CheckResult.taken(ms);
+        }
+
+        // "followers" e "following" no HTML = página de perfil real
+        if (lower.contains("followers") && lower.contains("following")) {
+            return CheckResult.taken(ms);
+        }
+
+        // ── Ambíguo — sem dados suficientes ───────────────────────────
+        // Se o título é apenas "TikTok" sem o username, provavelmente não existe
+        boolean hasGenericTitle =
+                lower.contains("<title>tiktok</title>") ||
+                        lower.contains("<title>tiktok -") ||
+                        (lower.contains("og:title") && !lower.contains(lowerUser));
+
+        if (hasGenericTitle) return CheckResult.available(ms);
+
+        // Default conservador: se chegou até aqui sem sinal claro, marca como error
+        // para não dar falso positivo "available"
+        LOGGER.warn("TikTok: could not determine status for '{}' — marking as error", username);
+        return CheckResult.error("could not determine — try manual check");
     }
 
     @Override
@@ -99,7 +228,6 @@ public class TikTokApi extends AbstractPlatformApi {
         if (username == null) return false;
         int len = username.length();
         if (len < Platform.TIKTOK.minLength || len > Platform.TIKTOK.maxLength) return false;
-        // TikTok: letras, números, underscores e pontos
         return username.matches("[a-zA-Z0-9_.]+");
     }
 }

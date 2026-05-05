@@ -9,13 +9,14 @@ import java.net.URL;
 
 /**
  * Lógica HTTP compartilhada por todas as plataformas.
- * Timeout aumentado para 12s para evitar errors falsos no início.
+ *
+ * Timeout mínimo de 12s para evitar errors falsos.
+ * Follow redirects habilitado (instanceFollowRedirects=true).
  */
 public abstract class AbstractPlatformApi implements PlatformApi {
 
     protected final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
-    // Timeout mínimo garantido independente da config do usuário
     private static final int MIN_TIMEOUT_MS = 12_000;
 
     @Override
@@ -42,7 +43,6 @@ public abstract class AbstractPlatformApi implements PlatformApi {
         } catch (java.net.SocketTimeoutException e) {
             long ms = System.currentTimeMillis() - start;
             LOGGER.warn("Timeout ({}ms) checking '{}' on {}", ms, username, getPlatform());
-            // Timeout não é erro fatal — tenta novamente como rate limit
             return CheckResult.rateLimit();
         } catch (java.net.UnknownHostException e) {
             LOGGER.error("No internet connection checking '{}': {}", username, e.getMessage());
@@ -57,7 +57,6 @@ public abstract class AbstractPlatformApi implements PlatformApi {
     protected abstract CheckResult interpretResponse(int httpCode, long ms);
 
     protected HttpURLConnection openConnection(String endpoint) throws Exception {
-        // Usa o maior entre config do usuário e mínimo garantido
         int configTimeout = AppConfig.getInstance().getSettings().getRequestTimeoutMs();
         int timeout = Math.max(configTimeout, MIN_TIMEOUT_MS);
 
@@ -67,7 +66,8 @@ public abstract class AbstractPlatformApi implements PlatformApi {
         conn.setConnectTimeout(timeout);
         conn.setReadTimeout(timeout);
         conn.setRequestProperty("User-Agent", "AliasForge/1.0");
-        conn.setInstanceFollowRedirects(false);
+        // Fix: segue redirects (307, 301, 302, 308) automaticamente
+        conn.setInstanceFollowRedirects(true);
         return conn;
     }
 }

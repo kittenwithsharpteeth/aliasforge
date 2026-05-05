@@ -17,6 +17,10 @@ import java.util.function.Consumer;
 
 /**
  * Controlador central da aplicação.
+ *
+ * Fix: results NÃO é limpo ao iniciar o algoritmo.
+ * O clear só acontece quando o usuário clicar em "clear" explicitamente.
+ * Isso preserva os resultados anteriores ao reiniciar o algoritmo.
  */
 public class AppController {
 
@@ -49,15 +53,18 @@ public class AppController {
 
     // ── Controle ───────────────────────────────────────────────────────
 
+    /**
+     * Inicia o algoritmo principal.
+     * Fix: NÃO limpa os results — o usuário decide quando limpar via botão "clear".
+     */
     public void start(GeneratorConfig config) {
-        Platform.runLater(results::clear);
+        // Sem results::clear aqui — preserva resultados anteriores
         LOGGER.info("Starting: platform={}, qty={}, mode={}",
                 config.getPlatform(), config.getQuantity(), config.getMode());
         checkerService.start(config);
     }
 
     public void startManual(List<String> usernames, com.aliasforge.model.Platform platform) {
-        Platform.runLater(results::clear);
         checkerService.startManual(usernames, platform);
     }
 
@@ -67,7 +74,26 @@ public class AppController {
 
     public void pause()  { checkerService.pause(); }
     public void resume() { checkerService.resume(); }
-    public void stop()   { checkerService.stop(); }
+
+    /**
+     * Para o algoritmo principal.
+     * A manualQueue continua funcionando.
+     * Os results NÃO são limpos.
+     */
+    public void stop() { checkerService.stop(); }
+
+    /**
+     * Para tudo — usado apenas ao encerrar o app.
+     */
+    public void stopAll() { checkerService.stopAll(); }
+
+    /**
+     * Limpa os results da tabela principal.
+     * Chamado apenas pelo botão "clear" do ResultsPanel.
+     */
+    public void clearResults() {
+        Platform.runLater(results::clear);
+    }
 
     public boolean isRunning() { return checkerService.isRunning(); }
     public boolean isPaused()  { return checkerService.isPaused(); }
@@ -132,8 +158,6 @@ public class AppController {
 
     private void handleStats(CheckerQueue.CheckerStats stats) {
         if (onStatsUpdate != null) onStatsUpdate.accept(stats);
-
-        // Atualiza tooltip da bandeja com estatísticas simples
         SystemTrayService.getInstance().setTooltip(
                 "AliasForge — available: " + stats.available() +
                         " | checked: " + stats.checked()
