@@ -3,182 +3,167 @@ package com.aliasforge.ui;
 import com.aliasforge.core.checker.CheckerService;
 import com.aliasforge.core.favorites.FavoritesRepository;
 import com.aliasforge.core.history.HistoryRepository;
-import com.aliasforge.core.queue.CheckerQueue;
+import com.aliasforge.core.state.AppState;
 import com.aliasforge.model.*;
 import com.aliasforge.util.SystemTrayService;
-import javafx.application.Platform;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import java.util.function.Consumer;
 
 /**
- * Controlador central da aplicação.
+ * AppController — camada fina entre a UI e o core.
  *
- * Fix: results NÃO é limpo ao iniciar o algoritmo.
- * O clear só acontece quando o usuário clicar em "clear" explicitamente.
- * Isso preserva os resultados anteriores ao reiniciar o algoritmo.
+ * Responsabilidades:
+ * - Receber ações da UI (start, stop, pause, toggleFavorite, etc.)
+ * - Delegar para os serviços corretos
+ * - Atualizar o AppState com os resultados
+ *
+ * O que NÃO faz mais:
+ * - Sem ObservableList (JavaFX)
+ * - Sem Platform.runLater (JavaFX)
+ * - Sem lógica de negócio
+ * - Sem decisões sobre histórico ou favoritos
+ *
+ * A UI observa o AppState diretamente via listeners.
  */
 public class AppController {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AppController.class);
 
+    private final AppState            state;
     private final CheckerService      checkerService;
     private final HistoryRepository   historyRepo;
     private final FavoritesRepository favoritesRepo;
 
-    private final ObservableList<UsernameResult> results   = FXCollections.observableArrayList();
-    private final ObservableList<UsernameResult> history   = FXCollections.observableArrayList();
-    private final ObservableList<UsernameResult> favorites = FXCollections.observableArrayList();
-
-    private Consumer<CheckerQueue.CheckerStats> onStatsUpdate;
-    private Runnable                            onCompleted;
-
     public AppController() {
+        this.state         = new AppState();
         this.historyRepo   = HistoryRepository.getInstance();
         this.favoritesRepo = FavoritesRepository.getInstance();
 
         this.checkerService = new CheckerService(
-                this::handleResult,
-                this::handleStats,
-                this::handleCompleted
+                this::onResult,
+                this::onStats,
+                this::onCompleted
         );
 
-        history.setAll(historyRepo.getAll());
-        favorites.setAll(favoritesRepo.getAll());
+        // Carrega histórico e favoritos no estado inicial
+        state.setHistory(historyRepo.getAll());
+        state.setFavorites(favoritesRepo.getAll());
     }
 
-    // ── Controle ───────────────────────────────────────────────────────
+    // ── Ações do algoritmo principal ───────────────────────────────────
 
     /**
-     * Inicia o algoritmo principal.
-     * Fix: NÃO limpa os results — o usuário decide quando limpar via botão "clear".
+     * Inicia o algoritmo. Não limpa os results — isso é decisão da UI.
      */
     public void start(GeneratorConfig config) {
-        // Sem results::clear aqui — preserva resultados anteriores
         LOGGER.info("Starting: platform={}, qty={}, mode={}",
                 config.getPlatform(), config.getQuantity(), config.getMode());
+        state.setRunning(true);
+        state.setPaused(false);
         checkerService.start(config);
     }
 
-    public void startManual(List<String> usernames, com.aliasforge.model.Platform platform) {
-        checkerService.startManual(usernames, platform);
+    public void pause() {
+        checkerService.pause();
+        state.setPaused(true);
     }
 
-    public void addManualTask(String username, com.aliasforge.model.Platform platform) {
+    public void resume() {
+        checkerService.resume();
+        state.setPaused(false);
+    }
+
+    public void stop() {
+        checkerService.stop();
+        state.setRunning(false);
+        state.setPaused(false);
+    }
+
+    public void stopAll() {
+        checkerService.stopAll();
+        state.setRunning(false);
+        state.setPaused(false);
+    }
+
+    // ── Ações do manual verifier ───────────────────────────────────────
+
+    public void addManualTask(String username, Platform platform) {
         checkerService.addManual(username, platform);
     }
 
-    public void pause()  { checkerService.pause(); }
-    public void resume() { checkerService.resume(); }
+    public void startManual(List<String> usernames, Platform platform) {
+        checkerService.startManual(usernames, platform);
+    }
 
-    /**
-     * Para o algoritmo principal.
-     * A manualQueue continua funcionando.
-     * Os results NÃO são limpos.
-     */
-    public void stop() { checkerService.stop(); }
+    // ── Ações de results ───────────────────────────────────────────────
 
-    /**
-     * Para tudo — usado apenas ao encerrar o app.
-     */
-    public void stopAll() { checkerService.stopAll(); }
-
-    /**
-     * Limpa os results da tabela principal.
-     * Chamado apenas pelo botão "clear" do ResultsPanel.
-     */
+    /** Limpa os results. Chamado pelo botão "clear" da UI. */
     public void clearResults() {
-        Platform.runLater(results::clear);
+        state.clearResults();
     }
 
-    public boolean isRunning() { return checkerService.isRunning(); }
-    public boolean isPaused()  { return checkerService.isPaused(); }
+    // ── Ações de favoritos ─────────────────────────────────────────────
 
-    // ── Favoritos ──────────────────────────────────────────────────────
-
-    public void toggleFavorite(String username, com.aliasforge.model.Platform platform) {
+    public void toggleFavorite(String username, Platform platform) {
         historyRepo.toggleFavorite(username, platform);
-        Platform.runLater(() -> {
-            history.setAll(historyRepo.getAll());
-            favorites.setAll(favoritesRepo.getAll());
-            for (int i = 0; i < results.size(); i++) {
-                UsernameResult r = results.get(i);
-                if (r.getUsername().equalsIgnoreCase(username) &&
-                        r.getPlatform() == platform) {
-                    results.set(i, r.withFavorited(!r.isFavorited()));
-                    break;
-                }
+        state.setHistory(historyRepo.getAll());
+        state.setFavorites(favoritesRepo.getAll());
+
+        // Atualiza o resultado na lista se estiver visível
+        List<UsernameResult> current = state.getResults();
+        for (int i = 0; i < current.size(); i++) {
+            UsernameResult r = current.get(i);
+            if (r.getUsername().equalsIgnoreCase(username) && r.getPlatform() == platform) {
+                state.upsertResult(r.withFavorited(!r.isFavorited()));
+                break;
             }
-        });
+        }
     }
 
-    public boolean isFavorited(String username, com.aliasforge.model.Platform platform) {
+    public boolean isFavorited(String username, Platform platform) {
         return favoritesRepo.isFavorited(username, platform);
     }
 
-    // ── Histórico ──────────────────────────────────────────────────────
+    // ── Ações de histórico ─────────────────────────────────────────────
 
     public void clearHistory() {
         historyRepo.clear();
-        Platform.runLater(() -> { history.clear(); favorites.clear(); });
+        state.clearHistory();
+        state.clearFavorites();
     }
 
-    public void refreshHistory() {
-        Platform.runLater(() -> {
-            history.setAll(historyRepo.getAll());
-            favorites.setAll(favoritesRepo.getAll());
-        });
-    }
+    // ── Estado ─────────────────────────────────────────────────────────
 
-    // ── Listas ─────────────────────────────────────────────────────────
+    public AppState  getState()     { return state; }
+    public boolean   isRunning()    { return checkerService.isRunning(); }
+    public boolean   isPaused()     { return checkerService.isPaused(); }
 
-    public ObservableList<UsernameResult> getResults()   { return results; }
-    public ObservableList<UsernameResult> getHistory()   { return history; }
-    public ObservableList<UsernameResult> getFavorites() { return favorites; }
+    // ── Handlers internos (chamados pelo CheckerService) ───────────────
 
-    public void setOnStatsUpdate(Consumer<CheckerQueue.CheckerStats> cb) { this.onStatsUpdate = cb; }
-    public void setOnCompleted(Runnable cb) { this.onCompleted = cb; }
+    private void onResult(UsernameResult result) {
+        state.upsertResult(result);
 
-    // ── Handlers ───────────────────────────────────────────────────────
-
-    private void handleResult(UsernameResult result) {
-        updateOrAddResult(result);
-
+        // Persiste no histórico (exceto estados transitórios)
         if (result.getStatus() != CheckStatus.CHECKING &&
                 result.getStatus() != CheckStatus.PENDING  &&
                 result.getStatus() != CheckStatus.RATE_LIMIT) {
             historyRepo.add(result);
-            history.setAll(historyRepo.getAll());
+            state.setHistory(historyRepo.getAll());
         }
     }
 
-    private void handleStats(CheckerQueue.CheckerStats stats) {
-        if (onStatsUpdate != null) onStatsUpdate.accept(stats);
+    private void onStats(com.aliasforge.core.queue.CheckerQueue.CheckerStats stats) {
+        state.updateStats(stats);
         SystemTrayService.getInstance().setTooltip(
                 "AliasForge — available: " + stats.available() +
-                        " | checked: " + stats.checked()
-        );
+                        " | checked: " + stats.checked());
     }
 
-    private void handleCompleted() {
+    private void onCompleted() {
         LOGGER.info("Checker completed.");
-        Platform.runLater(() -> { if (onCompleted != null) onCompleted.run(); });
+        state.signalCompleted();
         SystemTrayService.getInstance().setTooltip("AliasForge — idle");
-    }
-
-    private void updateOrAddResult(UsernameResult result) {
-        for (int i = 0; i < results.size(); i++) {
-            UsernameResult e = results.get(i);
-            if (e.getUsername().equalsIgnoreCase(result.getUsername()) &&
-                    e.getPlatform() == result.getPlatform()) {
-                results.set(i, result);
-                return;
-            }
-        }
-        results.add(result);
     }
 }

@@ -1,17 +1,26 @@
 package com.aliasforge.ui.views;
 
+import com.aliasforge.core.state.AppState;
 import com.aliasforge.ui.AppController;
 import com.aliasforge.ui.panels.ResultsPanel;
 import com.aliasforge.ui.panels.SidebarPanel;
 import com.aliasforge.ui.panels.StatusBarPanel;
 import com.aliasforge.ui.panels.ToolbarPanel;
+import javafx.application.Platform;
 import javafx.geometry.Orientation;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
+/**
+ * MainWindow — monta a janela e conecta AppState à UI via listeners.
+ *
+ * Todo o Platform.runLater está aqui — na camada de UI — onde faz sentido.
+ * O AppController e AppState não sabem nada de JavaFX.
+ */
 public class MainWindow extends BorderPane {
 
     private final AppController controller;
+    private final AppState      state;
 
     private ToolbarPanel    toolbarPanel;
     private ResultsPanel    resultsPanel;
@@ -25,9 +34,11 @@ public class MainWindow extends BorderPane {
 
     public MainWindow(AppController controller) {
         this.controller = controller;
+        this.state      = controller.getState();
         getStyleClass().add("main-window");
         buildUI();
-        wireController();
+        wireActions();
+        wireState();
     }
 
     private void buildUI() {
@@ -121,17 +132,15 @@ public class MainWindow extends BorderPane {
         return tab;
     }
 
-    // ── Wire controller ────────────────────────────────────────────────
+    // ── Ações dos botões (UI → Controller) ────────────────────────────
 
-    private void wireController() {
+    private void wireActions() {
         // Play
         toolbarPanel.getBtnPlay().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
-                toolbarPanel.setRunningState(true, false);
             } else {
                 controller.start(sidebarPanel.buildConfig());
-                toolbarPanel.setRunningState(true, false);
                 toolbarPanel.resetProgress();
             }
         });
@@ -140,25 +149,36 @@ public class MainWindow extends BorderPane {
         toolbarPanel.getBtnPause().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
-                toolbarPanel.setRunningState(true, false);
             } else {
                 controller.pause();
-                toolbarPanel.setRunningState(true, true);
             }
         });
 
         // Stop
-        toolbarPanel.getBtnStop().setOnAction(e -> {
-            controller.stop();
-            toolbarPanel.setRunningState(false, false);
-        });
+        toolbarPanel.getBtnStop().setOnAction(e -> controller.stop());
 
         // Filter + Search → ResultsPanel
         toolbarPanel.setOnFilterChanged((filter, search) ->
                 resultsPanel.applyFilter(filter, search));
+    }
 
-        // Stats
-        controller.setOnStatsUpdate(stats -> {
+    // ── Estado (AppState → UI) — tudo com Platform.runLater ───────────
+
+    /**
+     * Registra os listeners no AppState.
+     * Todos os updates de UI são feitos via Platform.runLater — centralizado aqui.
+     * O AppState não sabe nada de JavaFX.
+     */
+    private void wireState() {
+        // Estado do checker → toolbar e status
+        state.addOnRunningChanged(() -> Platform.runLater(() -> {
+            boolean running = state.isRunning();
+            boolean paused  = state.isPaused();
+            toolbarPanel.setRunningState(running, paused);
+        }));
+
+        // Stats → status bar e progress
+        state.addOnStatsChanged(stats -> Platform.runLater(() -> {
             statusBarPanel.updateStats(
                     stats.available(), stats.taken(),
                     stats.rateLimit(), stats.error(),
@@ -170,10 +190,13 @@ public class MainWindow extends BorderPane {
                 statusBarPanel.updateProgress(pct);
                 toolbarPanel.updateProgress(pct, stats.checked(), total);
             }
-        });
+        }));
 
-        // Completed
-        controller.setOnCompleted(() ->
-                toolbarPanel.setRunningState(false, false));
+        // Completed → reseta toolbar
+        state.addOnCompleted(() -> Platform.runLater(() ->
+                toolbarPanel.setRunningState(false, false)));
+
+        // Results → ResultsPanel (já é notificado diretamente pelo AppState via resultsPanel)
+        // O ResultsPanel se registra no AppState no seu próprio construtor
     }
 }

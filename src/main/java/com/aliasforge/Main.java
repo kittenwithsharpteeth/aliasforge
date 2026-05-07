@@ -33,11 +33,10 @@ public class Main extends Application {
         String css = getClass().getResource("/css/app.css").toExternalForm();
         scene.getStylesheets().add(css);
 
-        // ── Ícone da janela ────────────────────────────────────────────
         try {
             Image icon = new Image(
                     Objects.requireNonNull(
-                            getClass().getResourceAsStream("/icons/icon.jpg")));
+                            getClass().getResourceAsStream("/icons/icon.png")));
             stage.getIcons().add(icon);
         } catch (Exception e) {
             LOGGER.warn("Could not load window icon: {}", e.getMessage());
@@ -51,27 +50,23 @@ public class Main extends Application {
         // ── System Tray ────────────────────────────────────────────────
         SystemTrayService tray = SystemTrayService.getInstance();
         tray.install(
-                // onShow — restaura a janela
                 () -> Platform.runLater(() -> {
                     stage.show();
                     stage.setIconified(false);
                     stage.toFront();
                 }),
-                // onExit — encerra completamente
                 () -> {
                     LOGGER.info("Exit via tray.");
-                    controller.stop();
+                    controller.stopAll(); // para algoritmo + manual queue
                     tray.uninstall();
                     Platform.exit();
                     System.exit(0);
                 },
-                // onPause
                 () -> Platform.runLater(controller::pause),
-                // onResume
                 () -> Platform.runLater(controller::resume)
         );
 
-        // ── Minimizar para bandeja (respeita a preferência do usuário) ─
+        // ── Minimizar para bandeja ─────────────────────────────────────
         stage.iconifiedProperty().addListener((obs, wasMin, isMin) -> {
             if (isMin && tray.isInstalled()) {
                 boolean minimizeToTray = AppConfig.getInstance()
@@ -81,32 +76,27 @@ public class Main extends Application {
                         stage.hide();
                         tray.showMessage(
                                 "AliasForge is running in the background",
-                                "Double-click the tray icon to restore."
-                        );
+                                "Double-click the tray icon to restore.");
                     });
                 }
-                // Se minimizeToTray=false, deixa minimizar normalmente na taskbar
             }
         });
 
-        // ── Fechar janela (X) — respeita a preferência do usuário ──────
+        // ── Fechar janela ──────────────────────────────────────────────
         stage.setOnCloseRequest(e -> {
             e.consume();
             boolean minimizeToTray = AppConfig.getInstance()
                     .getSettings().isMinimizeToTray();
 
             if (tray.isInstalled() && minimizeToTray) {
-                // Vai para a bandeja
                 stage.hide();
                 tray.showMessage(
                         "AliasForge is running in the background",
                         "Double-click the tray icon to restore.\n" +
-                                "Right-click the icon to exit completely."
-                );
+                                "Right-click the icon to exit completely.");
             } else {
-                // Encerra normalmente — tray desabilitado ou sem suporte
                 LOGGER.info("Shutting down.");
-                controller.stop();
+                controller.stopAll(); // para tudo, incluindo manualQueue
                 tray.uninstall();
                 Platform.exit();
                 System.exit(0);

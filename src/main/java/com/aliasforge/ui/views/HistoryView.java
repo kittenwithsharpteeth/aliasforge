@@ -1,5 +1,6 @@
 package com.aliasforge.ui.views;
 
+import com.aliasforge.core.state.AppState;
 import com.aliasforge.model.Platform;
 import com.aliasforge.model.UsernameResult;
 import com.aliasforge.ui.AppController;
@@ -23,6 +24,7 @@ import java.util.stream.Collectors;
 public class HistoryView extends VBox {
 
     private final AppController      controller;
+    private final AppState           state;
     private TableView<HistoryRow>    table;
     private Label totalLabel, availableLabel, takenLabel, errorLabel;
     private ComboBox<String> filterCombo, platformCombo;
@@ -30,11 +32,12 @@ public class HistoryView extends VBox {
 
     public HistoryView(AppController controller) {
         this.controller = controller;
+        this.state      = controller.getState();
         getStyleClass().add("history-view");
         setFillWidth(true);
         VBox.setVgrow(this, Priority.ALWAYS);
         buildUI();
-        bindData();
+        bindState();
     }
 
     private void buildUI() {
@@ -62,7 +65,10 @@ public class HistoryView extends VBox {
         Label platformLbl = new Label("platform");
         platformLbl.getStyleClass().add("af-label-muted");
         platformCombo = new ComboBox<>();
-        platformCombo.getItems().addAll("all", "minecraft", "custom");
+        platformCombo.getItems().add("all");
+        for (com.aliasforge.model.Platform p : com.aliasforge.model.Platform.values()) {
+            platformCombo.getItems().add(p.displayName);
+        }
         platformCombo.setValue("all");
         platformCombo.getStyleClass().add("af-combo");
         platformCombo.setPrefWidth(110);
@@ -191,11 +197,11 @@ public class HistoryView extends VBox {
         return bar;
     }
 
-    // ── Bind e filtro ──────────────────────────────────────────────────
+    // ── Bind ao AppState ───────────────────────────────────────────────
 
-    private void bindData() {
-        controller.getHistory().addListener(
-                (javafx.collections.ListChangeListener<UsernameResult>) c -> applyFilter());
+    private void bindState() {
+        state.addOnHistoryChanged(() ->
+                javafx.application.Platform.runLater(this::applyFilter));
         applyFilter();
     }
 
@@ -204,7 +210,7 @@ public class HistoryView extends VBox {
         String platformFilter = platformCombo.getValue();
         String search         = searchField.getText().toLowerCase().trim();
 
-        List<HistoryRow> filtered = controller.getHistory().stream()
+        List<HistoryRow> filtered = state.getHistory().stream()
                 .filter(r -> "all".equals(statusFilter) ||
                         r.getStatus().getDisplayName().equals(statusFilter))
                 .filter(r -> "all".equals(platformFilter) ||
@@ -234,31 +240,19 @@ public class HistoryView extends VBox {
 
     private void exportCsv() {
         List<HistoryRow> rows = table.getItems();
-        if (rows.isEmpty()) {
-            showAlert("Export CSV", "No history to export.");
-            return;
-        }
-
+        if (rows.isEmpty()) { showAlert("Export CSV", "No history to export."); return; }
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Export History as CSV");
         chooser.setInitialFileName("aliasforge_history.csv");
-        chooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
-
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
         File file = chooser.showSaveDialog(getScene() != null ? getScene().getWindow() : null);
         if (file == null) return;
-
         try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
             bw.write("username,status,platform,checked_at,ms");
             bw.newLine();
             for (HistoryRow r : rows) {
-                bw.write(String.join(",",
-                        r.getUsername(),
-                        r.statusProperty().get(),
-                        r.platformProperty().get(),
-                        r.dateProperty().get(),
-                        r.timeProperty().get()
-                ));
+                bw.write(String.join(",", r.getUsername(), r.statusProperty().get(),
+                        r.platformProperty().get(), r.dateProperty().get(), r.timeProperty().get()));
                 bw.newLine();
             }
             showAlert("Export Complete", "History exported to:\n" + file.getAbsolutePath());
@@ -269,9 +263,7 @@ public class HistoryView extends VBox {
 
     private void showAlert(String title, String msg) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION, msg, ButtonType.OK);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.showAndWait();
+        alert.setTitle(title); alert.setHeaderText(null); alert.showAndWait();
     }
 
     // ── HistoryRow ─────────────────────────────────────────────────────

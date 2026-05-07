@@ -1,5 +1,6 @@
 package com.aliasforge.ui.panels;
 
+import com.aliasforge.core.state.AppState;
 import com.aliasforge.model.CheckStatus;
 import com.aliasforge.model.Platform;
 import com.aliasforge.model.UsernameResult;
@@ -22,25 +23,29 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * ResultsPanel — observa AppState via listener.
+ * Platform.runLater centralizado aqui — AppState não sabe de JavaFX.
+ */
 public class ResultsPanel extends VBox {
 
     private final AppController  controller;
+    private final AppState       state;
     private TableView<ResultRow> table;
 
-    // Lista mestre — todos os resultados sem filtro
     private final List<ResultRow> allRows = new ArrayList<>();
 
-    // Filtro atual
     private String currentFilter = "all";
     private String currentSearch = "";
 
     public ResultsPanel(AppController controller) {
         this.controller = controller;
+        this.state      = controller.getState();
         getStyleClass().add("results-panel");
         setFillWidth(true);
         VBox.setVgrow(this, Priority.ALWAYS);
         buildUI();
-        bindData();
+        bindState();
     }
 
     private void buildUI() {
@@ -72,11 +77,9 @@ public class ResultsPanel extends VBox {
         btnExport.getStyleClass().add("af-btn");
         btnClear.getStyleClass().add("af-btn");
 
-        // Selecionar todos visíveis
         btnAll.setOnAction(e ->
                 table.getItems().forEach(r -> r.selectedProperty().set(true)));
 
-        // Copiar selecionados
         btnCopy.setOnAction(e -> {
             String text = table.getItems().stream()
                     .filter(r -> r.selectedProperty().get())
@@ -85,7 +88,6 @@ public class ResultsPanel extends VBox {
             if (!text.isEmpty()) copyToClipboard(text);
         });
 
-        // Re-check selecionados — reseta status para "checking" imediatamente
         btnRecheck.setOnAction(e -> {
             List<ResultRow> selected = table.getItems().stream()
                     .filter(r -> r.selectedProperty().get())
@@ -95,35 +97,26 @@ public class ResultsPanel extends VBox {
                 return;
             }
             selected.forEach(r -> {
-                // Fix: reseta o status visual imediatamente para não confundir o usuário
                 r.statusProperty().set(CheckStatus.CHECKING.getDisplayName());
                 r.timeProperty().set("");
                 r.originProperty().set("");
-                // Enfileira o re-check no backend
                 controller.addManualTask(r.getUsername(), r.getPlatform());
             });
-            // Força refresh do filtro para refletir a mudança
             refreshTableView();
         });
 
-        // Favoritar selecionados
         btnFavorite.setOnAction(e ->
                 table.getItems().stream()
                         .filter(r -> r.selectedProperty().get())
                         .forEach(r -> controller.toggleFavorite(r.getUsername(), r.getPlatform())));
 
-        // Export CSV
         btnExport.setOnAction(e -> exportCsv());
 
-        // Limpar
-        btnClear.setOnAction(e -> {
-            allRows.clear();
-            table.getItems().clear();
-        });
+        // Clear — delega ao controller que atualiza o AppState
+        btnClear.setOnAction(e -> controller.clearResults());
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-
         bar.getChildren().addAll(
                 btnAll, btnCopy, btnRecheck, btnFavorite, btnExport, btnClear, spacer);
         return bar;
@@ -177,6 +170,30 @@ public class ResultsPanel extends VBox {
         return tv;
     }
 
+    // ── Bind ao AppState ───────────────────────────────────────────────
+
+    /**
+     * Observa o AppState via listener.
+     * O Platform.runLater garante que updates de UI rodem na thread correta.
+     */
+    private void bindState() {
+        state.addOnResultsChanged(() -> javafx.application.Platform.runLater(() -> {
+            List<UsernameResult> current = state.getResults();
+
+            // Se o estado ficou vazio (clear foi chamado), limpa a tabela
+            if (current.isEmpty()) {
+                allRows.clear();
+                table.getItems().clear();
+                return;
+            }
+
+            // Sincroniza cada resultado
+            for (UsernameResult result : current) {
+                updateOrAdd(result);
+            }
+        }));
+    }
+
     // ── Filtro e busca ─────────────────────────────────────────────────
 
     public void applyFilter(String filter, String search) {
@@ -203,30 +220,7 @@ public class ResultsPanel extends VBox {
         return r.getUsername().toLowerCase().contains(currentSearch);
     }
 
-    // ── Bind ao controller ─────────────────────────────────────────────
-
-    private void bindData() {
-        controller.getResults().addListener(
-                (javafx.collections.ListChangeListener<UsernameResult>) change -> {
-                    while (change.next()) {
-                        if (change.wasAdded()) {
-                            for (UsernameResult r : change.getAddedSubList()) updateOrAdd(r);
-                        }
-                        if (change.wasReplaced()) {
-                            for (int i = change.getFrom(); i < change.getTo(); i++) {
-                                updateOrAdd(controller.getResults().get(i));
-                            }
-                        }
-                        if (change.wasRemoved() && controller.getResults().isEmpty()) {
-                            allRows.clear();
-                            table.getItems().clear();
-                        }
-                    }
-                });
-    }
-
     private void updateOrAdd(UsernameResult result) {
-        // Fix: busca por username E platform para evitar falsa dedup entre plataformas
         for (int i = 0; i < allRows.size(); i++) {
             ResultRow row = allRows.get(i);
             if (row.getUsername().equalsIgnoreCase(result.getUsername()) &&
@@ -236,7 +230,6 @@ public class ResultsPanel extends VBox {
                 return;
             }
         }
-        // Novo resultado
         ResultRow newRow = new ResultRow(result);
         allRows.add(newRow);
         if (matchesFilter(newRow) && matchesSearch(newRow)) {
@@ -253,16 +246,13 @@ public class ResultsPanel extends VBox {
             showAlert("Export CSV", "No results to export.");
             return;
         }
-
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Export Results as CSV");
         chooser.setInitialFileName("aliasforge_results.csv");
         chooser.getExtensionFilters().add(
                 new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
-
         File file = chooser.showSaveDialog(getScene() != null ? getScene().getWindow() : null);
         if (file == null) return;
-
         try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
             bw.write("username,status,api,ms,origin");
             bw.newLine();
@@ -272,12 +262,10 @@ public class ResultsPanel extends VBox {
                         r.statusProperty().get(),
                         r.platformProperty().get(),
                         r.timeProperty().get(),
-                        r.originProperty().get()
-                ));
+                        r.originProperty().get()));
                 bw.newLine();
             }
-            showAlert("Export Complete",
-                    "Results exported to:\n" + file.getAbsolutePath());
+            showAlert("Export Complete", "Results exported to:\n" + file.getAbsolutePath());
         } catch (IOException e) {
             showAlert("Export Error", "Failed to export: " + e.getMessage());
         }
@@ -361,6 +349,12 @@ public class ResultsPanel extends VBox {
             setText(platform);
             String color = switch (platform) {
                 case "minecraft" -> "#4a90d9";
+                case "github"    -> "#cccccc";
+                case "reddit"    -> "#ff4500";
+                case "guns.lol"  -> "#e53935";
+                case "caliber"   -> "#7b1fa2";
+                case "tiktok"    -> "#00bcd4";
+                case "instagram" -> "#e91e8c";
                 case "custom"    -> "#9c27b0";
                 default          -> "#888888";
             };

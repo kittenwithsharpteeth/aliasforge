@@ -1,6 +1,7 @@
 package com.aliasforge.ui.panels;
 
 import com.aliasforge.config.AppConfig;
+import com.aliasforge.core.state.AppState;
 import com.aliasforge.model.AppSettings;
 import com.aliasforge.model.GeneratorConfig;
 import com.aliasforge.model.Platform;
@@ -22,6 +23,7 @@ import java.util.List;
 public class SidebarPanel extends VBox {
 
     private final AppController controller;
+    private final AppState      state;
     private final AppSettings   settings = AppConfig.getInstance().getSettings();
 
     // ── Geração ────────────────────────────────────────────────────────
@@ -61,6 +63,7 @@ public class SidebarPanel extends VBox {
 
     public SidebarPanel(AppController controller) {
         this.controller = controller;
+        this.state      = controller.getState();
         getStyleClass().add("sidebar-panel");
         setPrefWidth(300);
         setMinWidth(260);
@@ -153,7 +156,7 @@ public class SidebarPanel extends VBox {
     private void addManualUsername() {
         String username = manualInput.getText().trim();
         if (username.isEmpty()) return;
-        Platform platform = manualPlatformCombo.getSelectedPlatform();
+        com.aliasforge.model.Platform platform = manualPlatformCombo.getSelectedPlatform();
         updateOrAddMiniRow(username, "checking", platform.displayName);
         controller.addManualTask(username, platform);
         manualInput.clear();
@@ -191,28 +194,16 @@ public class SidebarPanel extends VBox {
 
         tv.getColumns().addAll(colCheck, colName, colStatus, colPlatform);
 
-        controller.getResults().addListener(
-                (javafx.collections.ListChangeListener<com.aliasforge.model.UsernameResult>) change -> {
-                    while (change.next()) {
-                        if (change.wasAdded()) {
-                            for (var r : change.getAddedSubList()) {
-                                if (isManualEntry(r.getUsername(), r.getPlatform().displayName))
-                                    updateOrAddMiniRow(r.getUsername(),
-                                            r.getStatus().getDisplayName(),
-                                            r.getPlatform().displayName);
-                            }
-                        }
-                        if (change.wasReplaced()) {
-                            for (int i = change.getFrom(); i < change.getTo(); i++) {
-                                var r = controller.getResults().get(i);
-                                if (isManualEntry(r.getUsername(), r.getPlatform().displayName))
-                                    updateOrAddMiniRow(r.getUsername(),
-                                            r.getStatus().getDisplayName(),
-                                            r.getPlatform().displayName);
-                            }
-                        }
-                    }
-                });
+        // ── Observa AppState via listener — sem ObservableList do controller
+        state.addOnResultsChanged(() -> javafx.application.Platform.runLater(() -> {
+            for (var r : state.getResults()) {
+                if (isManualEntry(r.getUsername(), r.getPlatform().displayName)) {
+                    updateOrAddMiniRow(r.getUsername(),
+                            r.getStatus().getDisplayName(),
+                            r.getPlatform().displayName);
+                }
+            }
+        }));
 
         return tv;
     }
@@ -287,7 +278,6 @@ public class SidebarPanel extends VBox {
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-
         header.getChildren().addAll(dragHandle, arrow, titleLabel, spacer);
 
         header.setOnMouseClicked(e -> {
@@ -321,10 +311,7 @@ public class SidebarPanel extends VBox {
             e.consume();
         });
 
-        header.setOnDragExited(e -> {
-            header.setStyle("");
-            e.consume();
-        });
+        header.setOnDragExited(e -> { header.setStyle(""); e.consume(); });
 
         header.setOnDragDropped(e -> {
             Dragboard db = e.getDragboard();
@@ -387,8 +374,8 @@ public class SidebarPanel extends VBox {
         maxLenField   = buildNumberField("5");
 
         quantityField.focusedProperty().addListener((obs, was, is) -> { if (!is) saveSettings(); });
-        minLenField.focusedProperty().addListener((obs, was, is)   -> { if (!is) { validateMinMax(); saveSettings(); } });
-        maxLenField.focusedProperty().addListener((obs, was, is)   -> { if (!is) { validateMinMax(); saveSettings(); } });
+        minLenField.focusedProperty().addListener((obs, was, is) -> { if (!is) { validateMinMax(); saveSettings(); } });
+        maxLenField.focusedProperty().addListener((obs, was, is) -> { if (!is) { validateMinMax(); saveSettings(); } });
 
         box.getChildren().add(buildQuantityRow());
         box.getChildren().addAll(

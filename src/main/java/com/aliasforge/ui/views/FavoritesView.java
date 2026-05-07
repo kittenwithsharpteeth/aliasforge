@@ -1,5 +1,6 @@
 package com.aliasforge.ui.views;
 
+import com.aliasforge.core.state.AppState;
 import com.aliasforge.model.Platform;
 import com.aliasforge.model.UsernameResult;
 import com.aliasforge.ui.AppController;
@@ -23,6 +24,7 @@ import java.util.stream.Collectors;
 public class FavoritesView extends VBox {
 
     private final AppController    controller;
+    private final AppState         state;
     private TableView<FavoriteRow> table;
     private Label totalLabel, availableLabel, takenLabel;
     private ComboBox<String> platformCombo;
@@ -30,18 +32,18 @@ public class FavoritesView extends VBox {
 
     public FavoritesView(AppController controller) {
         this.controller = controller;
+        this.state      = controller.getState();
         getStyleClass().add("favorites-view");
         setFillWidth(true);
         VBox.setVgrow(this, Priority.ALWAYS);
         buildUI();
-        bindData();
+        bindState();
     }
 
     private void buildUI() {
-        HBox actionBar = buildActionBar();
         table = buildTable();
         VBox.setVgrow(table, Priority.ALWAYS);
-        getChildren().addAll(buildToolbar(), actionBar, table, buildStatsBar());
+        getChildren().addAll(buildToolbar(), buildActionBar(), table, buildStatsBar());
     }
 
     // ── Toolbar ────────────────────────────────────────────────────────
@@ -55,10 +57,9 @@ public class FavoritesView extends VBox {
         Label platformLbl = new Label("platform");
         platformLbl.getStyleClass().add("af-label-muted");
 
-        // Apenas plataformas reais do enum Platform
         platformCombo = new ComboBox<>();
         platformCombo.getItems().add("all");
-        for (Platform p : Platform.values()) {
+        for (com.aliasforge.model.Platform p : com.aliasforge.model.Platform.values()) {
             platformCombo.getItems().add(p.displayName);
         }
         platformCombo.setValue("all");
@@ -132,7 +133,7 @@ public class FavoritesView extends VBox {
 
         btnRemove.setOnAction(e -> table.getItems().stream()
                 .filter(r -> r.selectedProperty().get())
-                .collect(Collectors.toList()) // evita ConcurrentModification
+                .collect(Collectors.toList())
                 .forEach(r -> controller.toggleFavorite(r.getUsername(), r.getPlatform())));
 
         Region spacer = new Region();
@@ -220,11 +221,11 @@ public class FavoritesView extends VBox {
         return bar;
     }
 
-    // ── Bind e filtro ──────────────────────────────────────────────────
+    // ── Bind ao AppState ───────────────────────────────────────────────
 
-    private void bindData() {
-        controller.getFavorites().addListener(
-                (javafx.collections.ListChangeListener<UsernameResult>) c -> applyFilter());
+    private void bindState() {
+        state.addOnFavoritesChanged(() ->
+                javafx.application.Platform.runLater(this::applyFilter));
         applyFilter();
     }
 
@@ -232,7 +233,7 @@ public class FavoritesView extends VBox {
         String platformFilter = platformCombo.getValue();
         String search         = searchField.getText().toLowerCase().trim();
 
-        List<FavoriteRow> filtered = controller.getFavorites().stream()
+        List<FavoriteRow> filtered = state.getFavorites().stream()
                 .filter(r -> "all".equals(platformFilter) ||
                         r.getPlatform().displayName.equals(platformFilter))
                 .filter(r -> search.isEmpty() ||
@@ -245,10 +246,8 @@ public class FavoritesView extends VBox {
     }
 
     private void updateStats(List<FavoriteRow> rows) {
-        long avail = rows.stream()
-                .filter(r -> "available".equals(r.statusProperty().get())).count();
-        long taken = rows.stream()
-                .filter(r -> "taken".equals(r.statusProperty().get())).count();
+        long avail = rows.stream().filter(r -> "available".equals(r.statusProperty().get())).count();
+        long taken = rows.stream().filter(r -> "taken".equals(r.statusProperty().get())).count();
         totalLabel.setText("saved: " + rows.size());
         availableLabel.setText("available: " + avail);
         takenLabel.setText("taken: " + taken);
@@ -258,34 +257,22 @@ public class FavoritesView extends VBox {
 
     private void exportCsv() {
         List<FavoriteRow> rows = table.getItems();
-        if (rows.isEmpty()) {
-            showAlert("Export CSV", "No favorites to export.");
-            return;
-        }
-
+        if (rows.isEmpty()) { showAlert("Export CSV", "No favorites to export."); return; }
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Export Favorites as CSV");
         chooser.setInitialFileName("aliasforge_favorites.csv");
-        chooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
-
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
         File file = chooser.showSaveDialog(getScene() != null ? getScene().getWindow() : null);
         if (file == null) return;
-
         try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
             bw.write("username,status,platform,saved_at");
             bw.newLine();
             for (FavoriteRow r : rows) {
-                bw.write(String.join(",",
-                        r.getUsername(),
-                        r.statusProperty().get(),
-                        r.platformProperty().get(),
-                        r.dateProperty().get()
-                ));
+                bw.write(String.join(",", r.getUsername(), r.statusProperty().get(),
+                        r.platformProperty().get(), r.dateProperty().get()));
                 bw.newLine();
             }
-            showAlert("Export Complete",
-                    "Favorites exported to:\n" + file.getAbsolutePath());
+            showAlert("Export Complete", "Favorites exported to:\n" + file.getAbsolutePath());
         } catch (IOException e) {
             showAlert("Export Error", "Failed to export: " + e.getMessage());
         }
@@ -293,9 +280,7 @@ public class FavoritesView extends VBox {
 
     private void showAlert(String title, String msg) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION, msg, ButtonType.OK);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.showAndWait();
+        alert.setTitle(title); alert.setHeaderText(null); alert.showAndWait();
     }
 
     // ── FavoriteRow ────────────────────────────────────────────────────
@@ -324,8 +309,6 @@ public class FavoritesView extends VBox {
         public String          getUsername()      { return name.get(); }
         public Platform        getPlatform()      { return platformEnum; }
     }
-
-    // ── Cells ──────────────────────────────────────────────────────────
 
     private static class StatusCell extends TableCell<FavoriteRow, String> {
         @Override
