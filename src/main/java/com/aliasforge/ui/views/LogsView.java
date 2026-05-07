@@ -1,5 +1,6 @@
 package com.aliasforge.ui.views;
 
+import com.aliasforge.core.state.AppState;
 import com.aliasforge.model.CheckStatus;
 import com.aliasforge.model.UsernameResult;
 import com.aliasforge.ui.AppController;
@@ -21,6 +22,7 @@ import java.util.stream.Collectors;
 public class LogsView extends VBox {
 
     private final AppController   controller;
+    private final AppState        state;
     private TableView<LogRow>     table;
     private Label                 totalLabel;
     private Label                 rateLimitLabel;
@@ -30,6 +32,7 @@ public class LogsView extends VBox {
 
     public LogsView(AppController controller) {
         this.controller = controller;
+        this.state      = controller.getState();
         getStyleClass().add("logs-view");
         setFillWidth(true);
         VBox.setVgrow(this, Priority.ALWAYS);
@@ -173,11 +176,11 @@ public class LogsView extends VBox {
         return bar;
     }
 
-    // ── Bind e filtro ──────────────────────────────────────────────────
+    // ── Bind ao AppState ───────────────────────────────────────────────
 
     private void bindData() {
-        controller.getHistory().addListener(
-                (javafx.collections.ListChangeListener<UsernameResult>) c -> applyFilter());
+        state.addOnHistoryChanged(() ->
+                javafx.application.Platform.runLater(this::applyFilter));
         applyFilter();
     }
 
@@ -185,7 +188,7 @@ public class LogsView extends VBox {
         String type   = typeCombo.getValue();
         String search = searchField.getText().toLowerCase().trim();
 
-        List<LogRow> filtered = controller.getHistory().stream()
+        List<LogRow> filtered = state.getHistory().stream()
                 .filter(r -> r.getStatus() == CheckStatus.ERROR ||
                         r.getStatus() == CheckStatus.RATE_LIMIT)
                 .filter(r -> {
@@ -195,7 +198,8 @@ public class LogsView extends VBox {
                 })
                 .filter(r -> search.isEmpty() ||
                         r.getUsername().toLowerCase().contains(search) ||
-                        (r.getErrorDetail() != null && r.getErrorDetail().toLowerCase().contains(search)))
+                        (r.getErrorDetail() != null &&
+                                r.getErrorDetail().toLowerCase().contains(search)))
                 .map(LogRow::new)
                 .collect(Collectors.toList());
 
