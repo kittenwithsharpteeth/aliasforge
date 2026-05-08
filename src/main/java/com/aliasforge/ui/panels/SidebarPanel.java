@@ -5,6 +5,7 @@ import com.aliasforge.core.state.AppState;
 import com.aliasforge.model.AppSettings;
 import com.aliasforge.model.GeneratorConfig;
 import com.aliasforge.model.Platform;
+import com.aliasforge.service.UsernameCheckService;
 import com.aliasforge.ui.AppController;
 import com.aliasforge.ui.components.GroupedPlatformComboBox;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -146,19 +147,45 @@ public class SidebarPanel extends VBox {
 
         manualTable = buildMiniTable();
         manualTable.setPrefHeight(150);
-        btnClear.setOnAction(e -> manualTable.getItems().clear());
+        btnClear.setOnAction(e -> {
+            manualTable.getItems().clear();
+            // Limpa estilo de erro ao limpar a tabela
+            manualInput.setStyle("");
+            manualInput.setTooltip(null);
+        });
 
         actionBar.getChildren().addAll(btnCheck, btnClear);
         box.getChildren().addAll(header, inputRow, actionBar, manualTable);
         return box;
     }
 
+    /**
+     * Adiciona username para verificação manual com feedback imediato via ManualCheckResult.
+     *
+     * Antes: delegava void ao controller, erro só aparecia como "error" na tabela após request HTTP.
+     * Depois: usa ManualCheckResult para validação inline sem request HTTP.
+     */
     private void addManualUsername() {
         String username = manualInput.getText().trim();
         if (username.isEmpty()) return;
-        com.aliasforge.model.Platform platform = manualPlatformCombo.getSelectedPlatform();
+
+        Platform platform = manualPlatformCombo.getSelectedPlatform();
+
+        UsernameCheckService.ManualCheckResult result =
+                controller.addManualTask(username, platform);
+
+        if (result.isInvalid()) {
+            // Feedback inline no campo — sem alert, melhor UX
+            manualInput.setStyle("-fx-border-color: #f44336;");
+            manualInput.setTooltip(new Tooltip(result.rejectionReason()));
+            return;
+        }
+
+        // Limpa estilo de erro se havia
+        manualInput.setStyle("");
+        manualInput.setTooltip(null);
+
         updateOrAddMiniRow(username, "checking", platform.displayName);
-        controller.addManualTask(username, platform);
         manualInput.clear();
     }
 
@@ -194,7 +221,7 @@ public class SidebarPanel extends VBox {
 
         tv.getColumns().addAll(colCheck, colName, colStatus, colPlatform);
 
-        // ── Observa AppState via listener — sem ObservableList do controller
+        // Observa AppState via listener — sem ObservableList do controller
         state.addOnResultsChanged(() -> javafx.application.Platform.runLater(() -> {
             for (var r : state.getResults()) {
                 if (isManualEntry(r.getUsername(), r.getPlatform().displayName)) {

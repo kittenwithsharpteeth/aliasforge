@@ -2,6 +2,7 @@ package com.aliasforge.ui.views;
 
 import com.aliasforge.config.AppConfig;
 import com.aliasforge.model.AppSettings;
+import com.aliasforge.service.RateLimitService;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
@@ -123,6 +124,7 @@ public class SettingsView extends VBox {
             int v = n.intValue();
             maxRetriesValue.setText(v + (v == 1 ? " retry" : " retries"));
             saveSettings();
+            updateRetryDelayTooltip();
         });
 
         // Retry base delay — 15..120s step 15
@@ -132,6 +134,7 @@ public class SettingsView extends VBox {
             int v = n.intValue();
             retryDelayValue.setText(v + " s");
             saveSettings();
+            updateRetryDelayTooltip();
         });
 
         Label retryNote = buildNote(
@@ -229,6 +232,9 @@ public class SettingsView extends VBox {
         } finally {
             loading = false;
         }
+
+        // Aplica o tooltip gerado pelo RateLimitService após carregar os valores
+        updateRetryDelayTooltip();
     }
 
     private void saveSettings() {
@@ -244,6 +250,22 @@ public class SettingsView extends VBox {
         s.setMinimizeToTray(chkMinimizeToTray.isSelected());
 
         AppConfig.getInstance().save();
+    }
+
+    /**
+     * Atualiza o tooltip do slider de retry com a descrição gerada pelo RateLimitService.
+     *
+     * Antes: o tooltip era uma nota estática hardcoded no buildRetrySection().
+     * Depois: o RateLimitService.getPolicy().describe() gera o texto com os
+     * valores reais atuais, incluindo o backoff máximo calculado.
+     *
+     * Chamado após saveSettings() e após loadSettings() para manter o tooltip
+     * sempre sincronizado com os valores dos sliders.
+     */
+    private void updateRetryDelayTooltip() {
+        String description = RateLimitService.getInstance().getPolicy().describe();
+        retryDelaySlider.setTooltip(new Tooltip(description));
+        maxRetriesSlider.setTooltip(new Tooltip(description));
     }
 
     // ── Builders ───────────────────────────────────────────────────────

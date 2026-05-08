@@ -3,6 +3,7 @@ package com.aliasforge.ui.views;
 import com.aliasforge.core.state.AppState;
 import com.aliasforge.model.CheckStatus;
 import com.aliasforge.model.UsernameResult;
+import com.aliasforge.service.ExportService;
 import com.aliasforge.ui.AppController;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
@@ -12,10 +13,7 @@ import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -178,6 +176,14 @@ public class LogsView extends VBox {
 
     // ── Bind ao AppState ───────────────────────────────────────────────
 
+    /**
+     * Antes: usava controller.getHistory() como ObservableList — acoplamento forte
+     * que expunha a lista interna do controller para a UI.
+     *
+     * Depois: usa AppState via listener, igual às outras views.
+     * Elimina o getHistory() do AppController que retornava ObservableList JavaFX,
+     * violando a separação UI/Core.
+     */
     private void bindData() {
         state.addOnHistoryChanged(() ->
                 javafx.application.Platform.runLater(this::applyFilter));
@@ -188,6 +194,7 @@ public class LogsView extends VBox {
         String type   = typeCombo.getValue();
         String search = searchField.getText().toLowerCase().trim();
 
+        // Filtra de state.getHistory() em vez de controller.getHistory()
         List<LogRow> filtered = state.getHistory().stream()
                 .filter(r -> r.getStatus() == CheckStatus.ERROR ||
                         r.getStatus() == CheckStatus.RATE_LIMIT)
@@ -215,41 +222,34 @@ public class LogsView extends VBox {
         errorLabel.setText("error: " + err);
     }
 
-    // ── Export CSV ─────────────────────────────────────────────────────
+    // ── Export CSV — delega ao ExportService ───────────────────────────
 
+    /**
+     * Antes: lógica manual de escape inline — "\"" + detail.replace("\"", "'") + "\""
+     * — propensa a bugs e diferente das outras views.
+     *
+     * Depois: delega ao ExportService que centraliza o escape CSV correto
+     * (campos com vírgulas entre aspas duplas, aspas duplicadas).
+     */
     private void exportCsv() {
-        if (table.getItems().isEmpty()) {
-            showAlert("Export CSV", "No logs to export.");
-            return;
-        }
+        ExportService export = controller.getExportService();
+
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Export Logs as CSV");
-        chooser.setInitialFileName("aliasforge_logs.csv");
+        chooser.setInitialFileName(export.suggestFilename(ExportService.ExportType.LOGS));
         chooser.getExtensionFilters().add(
                 new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
 
         File file = chooser.showSaveDialog(getScene() != null ? getScene().getWindow() : null);
         if (file == null) return;
 
-        try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
-            bw.write("time,type,username,api,detail");
-            bw.newLine();
-            for (LogRow r : table.getItems()) {
-                String detail = r.detailProperty().get() != null
-                        ? "\"" + r.detailProperty().get().replace("\"", "'") + "\""
-                        : "";
-                bw.write(String.join(",",
-                        r.timeProperty().get(),
-                        r.typeProperty().get(),
-                        r.usernameProperty().get(),
-                        r.platformProperty().get(),
-                        detail));
-                bw.newLine();
-            }
-            showAlert("Export Complete", "Logs exported to:\n" + file.getAbsolutePath());
-        } catch (IOException e) {
-            showAlert("Export Error", "Failed to export: " + e.getMessage());
-        }
+        // Passa os UsernameResult originais — o ExportService sabe formatar os logs
+        ExportService.ExportResult result = export.exportLogs(
+                table.getItems().stream().map(LogRow::toResult).toList(),
+                file.toPath()
+        );
+
+        showAlert("Export", result.userMessage());
     }
 
     private void showAlert(String title, String msg) {
@@ -267,13 +267,20 @@ public class LogsView extends VBox {
         private final StringProperty username = new SimpleStringProperty();
         private final StringProperty platform = new SimpleStringProperty();
         private final StringProperty detail   = new SimpleStringProperty();
+        private UsernameResult originalResult;
 
         public LogRow(UsernameResult r) {
+            this.originalResult = r;
             time.set(r.getCheckedAtFormatted());
             type.set(r.getStatus().getDisplayName());
             username.set(r.getUsername());
             platform.set(r.getPlatform().displayName);
             detail.set(r.getErrorDetail() != null ? r.getErrorDetail() : "");
+        }
+
+        /** Retorna o UsernameResult original para o ExportService. */
+        public UsernameResult toResult() {
+            return originalResult;
         }
 
         public StringProperty timeProperty()     { return time; }

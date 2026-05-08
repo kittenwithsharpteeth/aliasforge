@@ -3,6 +3,7 @@ package com.aliasforge.ui.views;
 import com.aliasforge.core.state.AppState;
 import com.aliasforge.model.Platform;
 import com.aliasforge.model.UsernameResult;
+import com.aliasforge.service.ExportService;
 import com.aliasforge.ui.AppController;
 import javafx.beans.property.*;
 import javafx.geometry.Insets;
@@ -14,10 +15,7 @@ import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -66,7 +64,7 @@ public class HistoryView extends VBox {
         platformLbl.getStyleClass().add("af-label-muted");
         platformCombo = new ComboBox<>();
         platformCombo.getItems().add("all");
-        for (com.aliasforge.model.Platform p : com.aliasforge.model.Platform.values()) {
+        for (Platform p : Platform.values()) {
             platformCombo.getItems().add(p.displayName);
         }
         platformCombo.setValue("all");
@@ -236,29 +234,30 @@ public class HistoryView extends VBox {
         errorLabel.setText("error / rate limit: " + errors);
     }
 
-    // ── Export CSV ─────────────────────────────────────────────────────
+    // ── Export CSV — delega ao ExportService ───────────────────────────
 
+    /**
+     * Antes: lógica embutida com BufferedWriter, colunas diferentes das do ResultsPanel.
+     * Depois: delega ao ExportService — UI só cuida do FileChooser e do alerta.
+     */
     private void exportCsv() {
-        List<HistoryRow> rows = table.getItems();
-        if (rows.isEmpty()) { showAlert("Export CSV", "No history to export."); return; }
+        ExportService export = controller.getExportService();
+
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Export History as CSV");
-        chooser.setInitialFileName("aliasforge_history.csv");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
+        chooser.setInitialFileName(export.suggestFilename(ExportService.ExportType.HISTORY));
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
+
         File file = chooser.showSaveDialog(getScene() != null ? getScene().getWindow() : null);
         if (file == null) return;
-        try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
-            bw.write("username,status,platform,checked_at,ms");
-            bw.newLine();
-            for (HistoryRow r : rows) {
-                bw.write(String.join(",", r.getUsername(), r.statusProperty().get(),
-                        r.platformProperty().get(), r.dateProperty().get(), r.timeProperty().get()));
-                bw.newLine();
-            }
-            showAlert("Export Complete", "History exported to:\n" + file.getAbsolutePath());
-        } catch (IOException e) {
-            showAlert("Export Error", "Failed to export: " + e.getMessage());
-        }
+
+        ExportService.ExportResult result = export.exportHistory(
+                table.getItems().stream().map(HistoryRow::toResult).toList(),
+                file.toPath()
+        );
+
+        showAlert("Export", result.userMessage());
     }
 
     private void showAlert(String title, String msg) {
@@ -276,9 +275,11 @@ public class HistoryView extends VBox {
         private final StringProperty  platform  = new SimpleStringProperty();
         private final StringProperty  date      = new SimpleStringProperty();
         private final StringProperty  time      = new SimpleStringProperty();
-        private Platform platformEnum;
+        private Platform       platformEnum;
+        private UsernameResult originalResult;
 
         public HistoryRow(UsernameResult r) {
+            this.originalResult = r;
             name.set(r.getUsername());
             status.set(r.getStatus().getDisplayName());
             platform.set(r.getPlatform().displayName);
@@ -286,6 +287,11 @@ public class HistoryView extends VBox {
             time.set(r.getResponseTimeDisplay());
             favorited.set(r.isFavorited());
             platformEnum = r.getPlatform();
+        }
+
+        /** Retorna o UsernameResult original para o ExportService. */
+        public UsernameResult toResult() {
+            return originalResult;
         }
 
         public BooleanProperty selectedProperty()  { return selected; }

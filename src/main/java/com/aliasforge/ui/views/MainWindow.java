@@ -1,6 +1,7 @@
 package com.aliasforge.ui.views;
 
 import com.aliasforge.core.state.AppState;
+import com.aliasforge.service.UsernameCheckService;
 import com.aliasforge.ui.AppController;
 import com.aliasforge.ui.panels.ResultsPanel;
 import com.aliasforge.ui.panels.SidebarPanel;
@@ -135,13 +136,17 @@ public class MainWindow extends BorderPane {
     // ── Ações dos botões (UI → Controller) ────────────────────────────
 
     private void wireActions() {
-        // Play
+        // Play — trata StartResult para exibir motivo se rejeitado
         toolbarPanel.getBtnPlay().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
             } else {
-                controller.start(sidebarPanel.buildConfig());
                 toolbarPanel.resetProgress();
+                UsernameCheckService.StartResult result =
+                        controller.start(sidebarPanel.buildConfig());
+                if (result.isRejected()) {
+                    showError("Cannot Start", result.rejectionReason());
+                }
             }
         });
 
@@ -195,8 +200,14 @@ public class MainWindow extends BorderPane {
         // Completed → reseta toolbar
         state.addOnCompleted(() -> Platform.runLater(() ->
                 toolbarPanel.setRunningState(false, false)));
+    }
 
-        // Results → ResultsPanel (já é notificado diretamente pelo AppState via resultsPanel)
-        // O ResultsPanel se registra no AppState no seu próprio construtor
+    // ── Helpers ────────────────────────────────────────────────────────
+
+    private void showError(String title, String message) {
+        Alert alert = new Alert(Alert.AlertType.WARNING, message, ButtonType.OK);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.showAndWait();
     }
 }

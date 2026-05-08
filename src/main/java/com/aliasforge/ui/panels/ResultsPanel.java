@@ -4,6 +4,7 @@ import com.aliasforge.core.state.AppState;
 import com.aliasforge.model.CheckStatus;
 import com.aliasforge.model.Platform;
 import com.aliasforge.model.UsernameResult;
+import com.aliasforge.service.ExportService;
 import com.aliasforge.ui.AppController;
 import javafx.beans.property.*;
 import javafx.geometry.Insets;
@@ -15,10 +16,7 @@ import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -239,36 +237,33 @@ public class ResultsPanel extends VBox {
         }
     }
 
-    // ── Export CSV ─────────────────────────────────────────────────────
+    // ── Export CSV — delega ao ExportService ───────────────────────────
 
+    /**
+     * Antes: ~20 linhas com FileWriter, try-catch e formatação embutida.
+     * Depois: delega ao ExportService — UI só cuida do FileChooser e do alerta.
+     *
+     * Nota: ResultRow mantém referência ao UsernameResult original via
+     * toUsernameResult() para evitar perda de dados na conversão.
+     */
     private void exportCsv() {
-        if (allRows.isEmpty()) {
-            showAlert("Export CSV", "No results to export.");
-            return;
-        }
+        ExportService export = controller.getExportService();
+
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Export Results as CSV");
-        chooser.setInitialFileName("aliasforge_results.csv");
+        chooser.setInitialFileName(export.suggestFilename(ExportService.ExportType.RESULTS));
         chooser.getExtensionFilters().add(
                 new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
+
         File file = chooser.showSaveDialog(getScene() != null ? getScene().getWindow() : null);
         if (file == null) return;
-        try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
-            bw.write("username,status,api,ms,origin");
-            bw.newLine();
-            for (ResultRow r : allRows) {
-                bw.write(String.join(",",
-                        r.getUsername(),
-                        r.statusProperty().get(),
-                        r.platformProperty().get(),
-                        r.timeProperty().get(),
-                        r.originProperty().get()));
-                bw.newLine();
-            }
-            showAlert("Export Complete", "Results exported to:\n" + file.getAbsolutePath());
-        } catch (IOException e) {
-            showAlert("Export Error", "Failed to export: " + e.getMessage());
-        }
+
+        ExportService.ExportResult result = export.exportResults(
+                allRows.stream().map(ResultRow::toUsernameResult).toList(),
+                file.toPath()
+        );
+
+        showAlert("Export", result.userMessage());
     }
 
     // ── Utilitários ────────────────────────────────────────────────────
@@ -296,11 +291,13 @@ public class ResultsPanel extends VBox {
         private final StringProperty  platform  = new SimpleStringProperty();
         private final StringProperty  time      = new SimpleStringProperty();
         private final StringProperty  origin    = new SimpleStringProperty();
-        private Platform platformEnum;
+        private Platform     platformEnum;
+        private UsernameResult originalResult; // mantida para toUsernameResult()
 
         public ResultRow(UsernameResult r) { update(r); }
 
         public void update(UsernameResult r) {
+            this.originalResult = r;
             name.set(r.getUsername());
             status.set(r.getStatus().getDisplayName());
             platform.set(r.getPlatform().displayName);
@@ -308,6 +305,14 @@ public class ResultsPanel extends VBox {
             origin.set(r.getOrigin() != null ? r.getOrigin() : "");
             favorited.set(r.isFavorited());
             this.platformEnum = r.getPlatform();
+        }
+
+        /**
+         * Retorna o UsernameResult original para o ExportService.
+         * Garante que todos os campos (errorDetail, checkedAt, etc.) sejam preservados.
+         */
+        public UsernameResult toUsernameResult() {
+            return originalResult;
         }
 
         public BooleanProperty selectedProperty()  { return selected; }
