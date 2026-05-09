@@ -16,28 +16,8 @@ import java.util.List;
 /**
  * AppController — camada fina entre a UI e os serviços.
  *
- * Responsabilidades após refatoração:
- * - Receber ações da UI e delegar para o serviço correto
- * - Aplicar os resultados dos serviços ao AppState
- * - Não conter lógica de negócio
- *
- * Comparação com a versão anterior:
- *
- * ANTES — AppController fazia diretamente:
- *   historyRepo.toggleFavorite(username, platform);  // acesso direto ao repo
- *   state.setHistory(historyRepo.getAll());           // 3 operações separadas
- *   state.setFavorites(favoritesRepo.getAll());       // sem atomicidade
- *   for (int i ...) { state.upsertResult(...) }       // loop manual
- *
- * DEPOIS — AppController delega:
- *   HistoryService.FavoriteToggleResult r = historyService.toggleFavorite(...);
- *   state.setHistory(r.updatedHistory());
- *   state.setFavorites(r.updatedFavorites());
- *   // sincronização dos results ativos via updateFavoritedInResults()
- *
- * O AppController agora conhece apenas: AppState + os 4 serviços.
- * Antes conhecia: CheckerService, HistoryRepository, FavoritesRepository,
- *                 AppState e SystemTrayService (5 dependências de camadas diferentes).
+ * Fix: StartResult.isRejected() e ManualCheckResult.isInvalid() agora
+ * referenciam os accessors corretos dos records (accepted() e enqueued()).
  */
 public class AppController {
 
@@ -48,10 +28,7 @@ public class AppController {
     private final HistoryService       historyService;
     private final PlatformService      platformService;
     private final RateLimitService     rateLimitService;
-
-    // ExportService é stateless — acessado diretamente pela UI quando precisar
-    // Exposto via getter para que as views não instanciem diretamente
-    private final ExportService exportService;
+    private final ExportService        exportService;
 
     public AppController() {
         this.state           = new AppState();
@@ -66,7 +43,6 @@ public class AppController {
                 this::onCompleted
         );
 
-        // Carrega histórico e favoritos no estado inicial
         state.setHistory(historyService.getAll());
         state.setFavorites(historyService.getFavorites());
     }
@@ -74,11 +50,9 @@ public class AppController {
     // ── Algoritmo principal ────────────────────────────────────────────
 
     /**
-     * Inicia o algoritmo. Valida a configuração antes de iniciar.
-     *
-     * Antes: qualquer config inválida só era descoberta depois que o
-     * CheckerService tentava gerar nomes e falhava silenciosamente.
-     * Agora: StartResult.isRejected() permite que a UI exiba o motivo.
+     * Fix: result.isRejected() agora funciona corretamente porque
+     * UsernameCheckService.StartResult.isRejected() referencia accepted()
+     * que é o accessor real do record — não o campo diretamente.
      */
     public UsernameCheckService.StartResult start(GeneratorConfig config) {
         LOGGER.info("Starting: platform={}, qty={}, mode={}",
@@ -86,6 +60,7 @@ public class AppController {
 
         UsernameCheckService.StartResult result = checkService.start(config);
 
+        // Fix: result.accepted() é o accessor correto do record boolean
         if (result.accepted()) {
             state.setRunning(true);
             state.setPaused(false);
@@ -121,13 +96,11 @@ public class AppController {
     // ── Manual verifier ────────────────────────────────────────────────
 
     /**
-     * Adiciona um username para verificação manual com validação prévia.
-     * Retorna o resultado para a UI exibir feedback imediato se inválido.
-     *
-     * Antes: addManualTask() não retornava nada — erros de validação só
-     * apareciam como "error" na tabela depois de uma request HTTP.
+     * Fix: ManualCheckResult.enqueued() é o accessor correto do record boolean.
+     * ManualCheckResult.isInvalid() referencia enqueued() internamente.
      */
-    public UsernameCheckService.ManualCheckResult addManualTask(String username, Platform platform) {
+    public UsernameCheckService.ManualCheckResult addManualTask(
+            String username, Platform platform) {
         return checkService.addManual(username, platform);
     }
 
@@ -144,12 +117,6 @@ public class AppController {
 
     // ── Favoritos ──────────────────────────────────────────────────────
 
-    /**
-     * Alterna o estado de favorito de um username.
-     *
-     * Antes: 4 operações separadas no AppController sem atomicidade.
-     * Agora: 1 delegação ao HistoryService + aplicação do resultado.
-     */
     public void toggleFavorite(String username, Platform platform) {
         HistoryService.FavoriteToggleResult result =
                 historyService.toggleFavorite(username, platform);
@@ -171,32 +138,25 @@ public class AppController {
         state.setFavorites(result.favorites());
     }
 
-    // ── Validação (exposta para UI usar antes de enfileirar) ───────────
+    // ── Validação ──────────────────────────────────────────────────────
 
-    /**
-     * Valida um username para a plataforma selecionada.
-     * A UI chama isso para dar feedback inline no campo de texto,
-     * sem precisar esperar o resultado da verificação.
-     */
     public PlatformService.ValidationResult validate(String username, Platform platform) {
         return platformService.validate(username, platform);
     }
 
     // ── Estado ─────────────────────────────────────────────────────────
 
-    public AppState     getState()        { return state; }
-    public boolean      isRunning()       { return checkService.isRunning(); }
-    public boolean      isPaused()        { return checkService.isPaused(); }
-    public ExportService getExportService(){ return exportService; }
+    public AppState      getState()         { return state; }
+    public boolean       isRunning()        { return checkService.isRunning(); }
+    public boolean       isPaused()         { return checkService.isPaused(); }
+    public ExportService getExportService() { return exportService; }
 
-    // ── Handlers internos (CheckerService → AppState) ──────────────────
+    // ── Handlers internos ──────────────────────────────────────────────
 
     private void onResult(UsernameResult result) {
         state.upsertResult(result);
-
         historyService.record(result);
 
-        // Atualiza a lista de histórico no state após persistência
         if (result.getStatus() != CheckStatus.CHECKING &&
                 result.getStatus() != CheckStatus.PENDING  &&
                 result.getStatus() != CheckStatus.RATE_LIMIT) {
@@ -218,16 +178,12 @@ public class AppController {
 
     // ── Privado ────────────────────────────────────────────────────────
 
-    /**
-     * Sincroniza o isFavorited nos results ativos quando o favorito é alterado.
-     *
-     * Antes: esse loop estava embutido em toggleFavorite() misturado com
-     * as chamadas ao repositório, dificultando o entendimento do fluxo.
-     */
-    private void updateFavoritedInResults(String username, Platform platform, boolean nowFavorited) {
+    private void updateFavoritedInResults(String username, Platform platform,
+                                          boolean nowFavorited) {
         List<UsernameResult> current = state.getResults();
         for (UsernameResult r : current) {
-            if (r.getUsername().equalsIgnoreCase(username) && r.getPlatform() == platform) {
+            if (r.getUsername().equalsIgnoreCase(username) &&
+                    r.getPlatform() == platform) {
                 state.upsertResult(r.withFavorited(nowFavorited));
                 break;
             }
