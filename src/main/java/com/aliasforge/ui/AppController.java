@@ -15,9 +15,6 @@ import java.util.List;
 
 /**
  * AppController — camada fina entre a UI e os serviços.
- *
- * Fix: StartResult.isRejected() e ManualCheckResult.isInvalid() agora
- * referenciam os accessors corretos dos records (accepted() e enqueued()).
  */
 public class AppController {
 
@@ -50,9 +47,10 @@ public class AppController {
     // ── Algoritmo principal ────────────────────────────────────────────
 
     /**
-     * Fix: result.isRejected() agora funciona corretamente porque
-     * UsernameCheckService.StartResult.isRejected() referencia accepted()
-     * que é o accessor real do record — não o campo diretamente.
+     * FIX: result.accepted() é o accessor do campo boolean do record —
+     * não confundir com o antigo factory method accepted() que foi
+     * renomeado para ofAccepted(). O accessor do campo funciona corretamente
+     * como boolean aqui.
      */
     public UsernameCheckService.StartResult start(GeneratorConfig config) {
         LOGGER.info("Starting: platform={}, qty={}, mode={}",
@@ -60,7 +58,6 @@ public class AppController {
 
         UsernameCheckService.StartResult result = checkService.start(config);
 
-        // Fix: result.accepted() é o accessor correto do record boolean
         if (result.accepted()) {
             state.setRunning(true);
             state.setPaused(false);
@@ -95,10 +92,6 @@ public class AppController {
 
     // ── Manual verifier ────────────────────────────────────────────────
 
-    /**
-     * Fix: ManualCheckResult.enqueued() é o accessor correto do record boolean.
-     * ManualCheckResult.isInvalid() referencia enqueued() internamente.
-     */
     public UsernameCheckService.ManualCheckResult addManualTask(
             String username, Platform platform) {
         return checkService.addManual(username, platform);

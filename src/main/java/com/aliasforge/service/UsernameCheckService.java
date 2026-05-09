@@ -53,16 +53,16 @@ public class UsernameCheckService {
                     .orElse("Platform unavailable.");
             LOGGER.warn("Start rejected: platform {} unavailable — {}",
                     config.getPlatform(), reason);
-            return StartResult.rejected(reason);
+            return StartResult.ofRejected(reason);
         }
 
         if (config.buildCharset().isEmpty()) {
-            return StartResult.rejected(
+            return StartResult.ofRejected(
                     "No character types selected. Enable at least one (letters, numbers, etc.).");
         }
 
         if (config.getMinLength() > config.getMaxLength()) {
-            return StartResult.rejected(
+            return StartResult.ofRejected(
                     "Minimum length cannot be greater than maximum length.");
         }
 
@@ -71,7 +71,7 @@ public class UsernameCheckService {
                 config.getPlatform(), config.getQuantity(), config.getMode());
 
         checkerService.start(config);
-        return StartResult.accepted();
+        return StartResult.ofAccepted();
     }
 
     public void pause()   { checkerService.pause(); }
@@ -87,18 +87,18 @@ public class UsernameCheckService {
 
         if (validation.isInvalid()) {
             LOGGER.debug("Manual check rejected: {} — {}", username, validation.errorMessage());
-            return ManualCheckResult.invalid(validation.errorMessage());
+            return ManualCheckResult.ofInvalid(validation.errorMessage());
         }
 
         if (!platformService.isAvailable(platform)) {
             String reason = platformService.getUnavailableReason(platform)
                     .orElse("Platform unavailable.");
-            return ManualCheckResult.invalid(reason);
+            return ManualCheckResult.ofInvalid(reason);
         }
 
         checkerService.addManual(username, platform);
         LOGGER.debug("Manual check enqueued: {} on {}", username, platform);
-        return ManualCheckResult.enqueued(username, platform);
+        return ManualCheckResult.ofEnqueued(username, platform);
     }
 
     public BatchManualResult addManualBatch(List<String> usernames, Platform platform) {
@@ -147,39 +147,56 @@ public class UsernameCheckService {
     // ── Records de retorno ─────────────────────────────────────────────
 
     /**
-     * Fix: campo "accepted" — accessor gerado é accepted(), não isAccepted().
-     * isRejected() é método extra que referencia accepted() corretamente.
+     * FIX: factory methods renomeados de accepted()/rejected() para
+     * ofAccepted()/ofRejected() — evita colisão com o accessor do campo
+     * 'accepted' gerado automaticamente pelo record.
+     *
+     * Sem o rename, 'accepted()' dentro do record é ambíguo entre o
+     * accessor do campo boolean e o factory method estático, causando:
+     *   - "invalid accessor method in record"
+     *   - "bad operand type StartResult for unary operator '!'"
+     *   - "incompatible types: StartResult cannot be converted to boolean"
+     *
+     * isRejected() usa '!accepted' (campo direto) para evitar ambiguidade.
      */
-    public record StartResult(boolean accepted, String rejectionReason) {
-        public static StartResult accepted()          { return new StartResult(true, null); }
-        public static StartResult rejected(String r)  { return new StartResult(false, r); }
+    public static record StartResult(boolean accepted, String rejectionReason) {
 
-        // Método de conveniência — referencia o accessor accepted() do record
-        public boolean isRejected() { return !accepted(); }
+        public static StartResult ofAccepted() {
+            return new StartResult(true, null);
+        }
+
+        public static StartResult ofRejected(String reason) {
+            return new StartResult(false, reason);
+        }
+
+        public boolean isRejected() { return !accepted; }
     }
 
     /**
-     * Fix: campo "enqueued" — accessor gerado é enqueued(), não isEnqueued().
-     * isInvalid() é método extra que referencia enqueued() corretamente.
+     * FIX: mesmo problema — factory methods renomeados de enqueued()/invalid()
+     * para ofEnqueued()/ofInvalid() para evitar colisão com o accessor do campo
+     * 'enqueued' e com o nome do record ValidationResult.
+     *
+     * isInvalid() usa '!enqueued' (campo direto).
      */
-    public record ManualCheckResult(
+    public static record ManualCheckResult(
             boolean  enqueued,
             String   username,
             Platform platform,
             String   rejectionReason) {
 
-        public static ManualCheckResult enqueued(String u, Platform p) {
+        public static ManualCheckResult ofEnqueued(String u, Platform p) {
             return new ManualCheckResult(true, u, p, null);
         }
-        public static ManualCheckResult invalid(String reason) {
+
+        public static ManualCheckResult ofInvalid(String reason) {
             return new ManualCheckResult(false, null, null, reason);
         }
 
-        // Método de conveniência — referencia o accessor enqueued() do record
-        public boolean isInvalid() { return !enqueued(); }
+        public boolean isInvalid() { return !enqueued; }
     }
 
-    public record BatchManualResult(int accepted, int rejected) {
+    public static record BatchManualResult(int accepted, int rejected) {
         public int     total()       { return accepted + rejected; }
         public boolean allAccepted() { return rejected == 0; }
     }
