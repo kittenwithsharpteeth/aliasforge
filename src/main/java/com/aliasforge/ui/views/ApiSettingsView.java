@@ -1,11 +1,55 @@
 package com.aliasforge.ui.views;
 
+import com.aliasforge.config.AppConfig;
+import com.aliasforge.model.CustomApiSettings;
+import com.aliasforge.model.CustomApiSettings.DetectionMode;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
+/**
+ * Aba "api settings" — configuração da Custom API e exibição das APIs ativas.
+ *
+ * A seção Custom API permite ao usuário escolher entre três modos:
+ *  - Status Code apenas
+ *  - Body Scraping apenas
+ *  - Ambos (status code primeiro, scraping como fallback)
+ *
+ * As configurações são salvas em AppSettings.customApi e persistidas
+ * automaticamente via AppConfig em ~/.aliasforge/settings.json.
+ */
 public class ApiSettingsView extends VBox {
+
+    // ── Custom API fields ──────────────────────────────────────────────
+    private TextField        urlField;
+    private TextField        delayField;
+    private TextField        headersField;
+    private CheckBox         enabledCheck;
+
+    // Detection mode
+    private ToggleGroup      modeGroup;
+    private RadioButton      rbStatusCode;
+    private RadioButton      rbBodyScraping;
+    private RadioButton      rbBoth;
+
+    // Status code section
+    private VBox             statusCodeSection;
+    private TextField        availableCodeField;
+    private TextField        takenCodeField;
+    private TextField        rateLimitCodeField;
+
+    // Body scraping section
+    private VBox             bodyScrapingSection;
+    private TextField        availableStringField;
+    private TextField        takenStringField;
+    private TextField        bodyLinesField;
+
+    // Feedback
+    private Label            statusLabel;
+
+    // Guard — evita salvar durante loadSettings()
+    private boolean loading = false;
 
     public ApiSettingsView() {
         getStyleClass().add("api-settings-view");
@@ -14,6 +58,7 @@ public class ApiSettingsView extends VBox {
         setPadding(new Insets(16, 20, 16, 20));
         setSpacing(16);
         buildUI();
+        loadSettings();
     }
 
     private void buildUI() {
@@ -29,12 +74,6 @@ public class ApiSettingsView extends VBox {
     private VBox buildActiveApisSection() {
         VBox section = buildSection("active apis");
 
-        Label note = new Label(
-                "ⓘ  Only Minecraft is fully supported. Other platforms are coming soon.");
-        note.setStyle("-fx-text-fill: #666666; -fx-font-size: 11px;");
-        note.setWrapText(true);
-
-        // Header
         HBox header = new HBox();
         header.setPadding(new Insets(6, 8, 6, 8));
         header.setStyle("-fx-background-color: #252525; " +
@@ -44,18 +83,49 @@ public class ApiSettingsView extends VBox {
                 buildColHeader("method",       80),
                 buildColHeader("endpoint url", 280),
                 buildColHeader("delay (ms)",   90),
-                buildColHeader("enabled",      70),
-                buildColHeader("actions",      120)
+                buildColHeader("status",       80)
         );
 
-        // Minecraft row
-        HBox minecraftRow = buildApiRow(
+        HBox minecraftRow = buildReadOnlyApiRow(
                 "minecraft", "GET",
                 "https://api.mojang.com/users/profiles/minecraft/",
-                "600", true, false
+                "600 ms", "active"
+        );
+        HBox githubRow = buildReadOnlyApiRow(
+                "github", "GET",
+                "https://api.github.com/users/",
+                "1500 ms", "active"
+        );
+        HBox redditRow = buildReadOnlyApiRow(
+                "reddit", "GET",
+                "https://www.reddit.com/user/{u}/about.json",
+                "1000 ms", "active"
+        );
+        HBox gunsRow = buildReadOnlyApiRow(
+                "guns.lol", "GET",
+                "https://guns.lol/",
+                "1000 ms", "web check"
+        );
+        HBox caliberRow = buildReadOnlyApiRow(
+                "caliber", "GET",
+                "https://caliber.lol/u/",
+                "1200 ms", "web check"
+        );
+        HBox tiktokRow = buildReadOnlyApiRow(
+                "tiktok", "GET",
+                "https://www.tiktok.com/@",
+                "2500 ms", "web check"
+        );
+        HBox instaRow = buildReadOnlyApiRow(
+                "instagram", "GET",
+                "https://www.instagram.com/",
+                "2500 ms", "web check"
         );
 
-        section.getChildren().addAll(note, header, minecraftRow);
+        section.getChildren().addAll(
+                header, minecraftRow, githubRow, redditRow,
+                gunsRow, caliberRow, tiktokRow, instaRow
+        );
         return section;
     }
 
@@ -65,42 +135,161 @@ public class ApiSettingsView extends VBox {
         VBox section = buildSection("custom api");
 
         Label desc = new Label(
-                "Configure your own endpoint. AliasForge will call GET {url}{username} " +
-                        "and interpret the HTTP response code.");
+                "Configure your own endpoint. AliasForge calls GET {url}{username} " +
+                        "and interprets the response using the mode you choose below.");
         desc.setStyle("-fx-text-fill: #666666; -fx-font-size: 11px;");
         desc.setWrapText(true);
 
-        // URL
-        VBox urlBox = buildInputGroup("endpoint url", "https://api.example.com/users/");
+        // ── Endpoint URL ───────────────────────────────────────────────
+        VBox urlGroup = buildLabeledField("Endpoint URL", "https://api.example.com/users/");
+        urlField = (TextField) ((VBox) urlGroup).getChildren().get(1);
+        urlField.textProperty().addListener((obs, o, n) -> saveSettings());
 
-        // Row: delay + available code + taken code
-        HBox row2 = new HBox(12);
-        row2.setAlignment(Pos.CENTER_LEFT);
-        VBox delayBox = buildInputGroup("delay (ms)", "1000");
-        VBox availBox = buildComboGroup("available when", new String[]{"404", "200", "302"}, "404");
-        VBox takenBox = buildComboGroup("taken when",     new String[]{"200", "404", "302"}, "200");
-        HBox.setHgrow(delayBox, Priority.ALWAYS);
-        row2.getChildren().addAll(delayBox, availBox, takenBox);
+        // ── Delay ──────────────────────────────────────────────────────
+        VBox delayGroup = buildLabeledField("Delay between requests (ms)", "1000");
+        delayField = (TextField) ((VBox) delayGroup).getChildren().get(1);
+        delayField.textProperty().addListener((obs, o, n) -> saveSettings());
 
-        // Headers
-        VBox headersBox = buildInputGroup(
-                "custom headers (JSON, optional)",
+        // ── Custom Headers ─────────────────────────────────────────────
+        VBox headersGroup = buildLabeledField(
+                "Custom headers (JSON, optional)",
                 "{\"Authorization\": \"Bearer TOKEN\"}");
+        headersField = (TextField) ((VBox) headersGroup).getChildren().get(1);
+        headersField.textProperty().addListener((obs, o, n) -> saveSettings());
 
-        // Enable toggle + save
-        HBox btnRow = new HBox(8);
-        btnRow.setAlignment(Pos.CENTER_RIGHT);
-        CheckBox enableChk = new CheckBox("enable custom api");
-        enableChk.getStyleClass().add("af-checkbox");
-        Button btnSave = new Button("save & enable");
+        // ── Detection mode ─────────────────────────────────────────────
+        Label modeLbl = new Label("Detection mode");
+        modeLbl.setStyle("-fx-text-fill: #999999; -fx-font-size: 11px;");
+
+        modeGroup     = new ToggleGroup();
+        rbStatusCode  = new RadioButton("Status Code only");
+        rbBodyScraping= new RadioButton("Body Scraping only");
+        rbBoth        = new RadioButton("Both (status code first, scraping as fallback)");
+
+        for (RadioButton rb : new RadioButton[]{rbStatusCode, rbBodyScraping, rbBoth}) {
+            rb.setToggleGroup(modeGroup);
+            rb.getStyleClass().add("af-checkbox");
+            rb.setStyle("-fx-text-fill: #aaaaaa;");
+        }
+        rbBoth.setSelected(true);
+
+        modeGroup.selectedToggleProperty().addListener((obs, o, n) -> {
+            updateModeVisibility();
+            saveSettings();
+        });
+
+        HBox modeRow = new HBox(16, rbStatusCode, rbBodyScraping, rbBoth);
+        modeRow.setAlignment(Pos.CENTER_LEFT);
+        modeRow.setPadding(new Insets(4, 0, 4, 0));
+
+        // ── Status Code section ────────────────────────────────────────
+        statusCodeSection = buildStatusCodeSection();
+
+        // ── Body Scraping section ──────────────────────────────────────
+        bodyScrapingSection = buildBodyScrapingSection();
+
+        // ── Enable + Save ──────────────────────────────────────────────
+        enabledCheck = new CheckBox("Enable custom API");
+        enabledCheck.getStyleClass().add("af-checkbox");
+        enabledCheck.setOnAction(e -> saveSettings());
+
+        Button btnSave = new Button("Save & Enable");
         btnSave.getStyleClass().addAll("af-btn", "af-btn-play");
-        btnSave.setOnAction(e -> showInfo("Custom API",
-                "Custom API support will be fully wired in a future update. " +
-                        "Settings saved for now."));
-        btnRow.getChildren().addAll(enableChk, btnSave);
+        btnSave.setOnAction(e -> onSaveAndEnable());
 
-        section.getChildren().addAll(desc, urlBox, row2, headersBox, btnRow);
+        Button btnTest = new Button("Test connection");
+        btnTest.getStyleClass().add("af-btn");
+        btnTest.setOnAction(e -> onTestConnection());
+
+        statusLabel = new Label("");
+        statusLabel.setStyle("-fx-font-size: 11px;");
+        statusLabel.setWrapText(true);
+
+        HBox btnRow = new HBox(8, enabledCheck, btnTest, btnSave);
+        btnRow.setAlignment(Pos.CENTER_RIGHT);
+
+        Separator sep = new Separator();
+        sep.setStyle("-fx-background-color: #333333;");
+
+        section.getChildren().addAll(
+                desc,
+                urlGroup,
+                delayGroup,
+                headersGroup,
+                modeLbl, modeRow,
+                statusCodeSection,
+                bodyScrapingSection,
+                sep,
+                btnRow,
+                statusLabel
+        );
         return section;
+    }
+
+    private VBox buildStatusCodeSection() {
+        VBox box = new VBox(8);
+        box.setPadding(new Insets(8, 0, 4, 0));
+
+        Label title = new Label("Status Code settings");
+        title.setStyle("-fx-text-fill: #777777; -fx-font-size: 11px; -fx-font-weight: bold;");
+
+        Label hint = new Label(
+                "Which HTTP status codes indicate each result. " +
+                        "Common pattern: 404 = available, 200 = taken.");
+        hint.setStyle("-fx-text-fill: #555555; -fx-font-size: 11px;");
+        hint.setWrapText(true);
+
+        availableCodeField  = buildSmallField("404");
+        takenCodeField      = buildSmallField("200");
+        rateLimitCodeField  = buildSmallField("429");
+
+        for (TextField f : new TextField[]{availableCodeField, takenCodeField, rateLimitCodeField}) {
+            f.textProperty().addListener((obs, o, n) -> saveSettings());
+        }
+
+        HBox row = new HBox(16,
+                buildInlineField("Available when HTTP", availableCodeField),
+                buildInlineField("Taken when HTTP",     takenCodeField),
+                buildInlineField("Rate limit when HTTP (0 = ignore)", rateLimitCodeField)
+        );
+        row.setAlignment(Pos.CENTER_LEFT);
+
+        box.getChildren().addAll(title, hint, row);
+        return box;
+    }
+
+    private VBox buildBodyScrapingSection() {
+        VBox box = new VBox(8);
+        box.setPadding(new Insets(8, 0, 4, 0));
+
+        Label title = new Label("Body Scraping settings");
+        title.setStyle("-fx-text-fill: #777777; -fx-font-size: 11px; -fx-font-weight: bold;");
+
+        Label hint = new Label(
+                "Strings to search for in the response body (case-insensitive). " +
+                        "\"Available\" signal is checked first. Leave blank to skip that check.");
+        hint.setStyle("-fx-text-fill: #555555; -fx-font-size: 11px;");
+        hint.setWrapText(true);
+
+        availableStringField = buildWideField("user not found");
+        takenStringField     = buildWideField("og:title");
+        bodyLinesField       = buildSmallField("80");
+
+        for (TextField f : new TextField[]{availableStringField, takenStringField, bodyLinesField}) {
+            f.textProperty().addListener((obs, o, n) -> saveSettings());
+        }
+
+        VBox availGroup = buildLabeledFieldRaw("Body contains (available signal)", availableStringField);
+        VBox takenGroup = buildLabeledFieldRaw("Body contains (taken signal)",     takenStringField);
+        VBox linesGroup = buildLabeledFieldRaw("Max lines to read (0 = all)",      bodyLinesField);
+
+        HBox row = new HBox(16, availGroup, takenGroup, linesGroup);
+        row.setAlignment(Pos.TOP_LEFT);
+        HBox.setHgrow(availGroup, Priority.ALWAYS);
+        HBox.setHgrow(takenGroup, Priority.ALWAYS);
+
+        box.getChildren().addAll(title, hint, row);
+        return box;
     }
 
     // ── Coming Soon ────────────────────────────────────────────────────
@@ -108,7 +297,7 @@ public class ApiSettingsView extends VBox {
     private VBox buildComingSoonSection() {
         VBox section = buildSection("coming soon");
 
-        String[] platforms = {"discord (requires bot)", "roblox", "instagram", "twitter/x"};
+        String[] platforms = {"discord (requires bot token)", "roblox", "twitter / x"};
 
         VBox list = new VBox(8);
         for (String name : platforms) {
@@ -135,122 +324,196 @@ public class ApiSettingsView extends VBox {
         return section;
     }
 
-    // ── API Row ────────────────────────────────────────────────────────
+    // ── Lógica dos botões ──────────────────────────────────────────────
 
-    private HBox buildApiRow(String name, String method, String url,
-                             String delay, boolean enabled, boolean editable) {
-        HBox row = new HBox();
-        row.setPadding(new Insets(7, 8, 7, 8));
-        row.setAlignment(Pos.CENTER_LEFT);
-        setRowStyle(row, false);
-        row.setOnMouseEntered(e -> setRowStyle(row, true));
-        row.setOnMouseExited(e  -> setRowStyle(row, false));
+    /**
+     * Salva e tenta habilitar a Custom API.
+     * Valida os campos antes de marcar como enabled=true.
+     */
+    private void onSaveAndEnable() {
+        saveSettings();
 
-        // Campos editáveis
-        TextField urlField   = new TextField(url);
-        TextField delayField = new TextField(delay);
-        urlField.getStyleClass().add("af-input");
-        delayField.getStyleClass().add("af-input");
-        urlField.setPrefWidth(260);
-        delayField.setPrefWidth(70);
-        urlField.setVisible(false);   urlField.setManaged(false);
-        delayField.setVisible(false); delayField.setManaged(false);
+        var cfg = AppConfig.getInstance().getSettings().getCustomApi();
 
-        Label nameLabel  = buildColLabel(name,        150, "#cccccc");
-        Label methodLabel= buildColLabel(method,      80,  "#4a90d9");
-        Label urlLabel   = buildColLabel(url,         280, "#777777");
-        urlLabel.setMaxWidth(260);
-        Label delayLabel = buildColLabel(delay + " ms", 90, "#aaaaaa");
+        if (cfg.getEndpointUrl().isBlank()) {
+            setStatus("⚠  Endpoint URL is required.", "#ffc107");
+            return;
+        }
+        if (!cfg.isConfigured()) {
+            setStatus("⚠  Please configure at least one detection signal " +
+                    "(status code or body string).", "#ffc107");
+            return;
+        }
 
-        CheckBox enabledChk = new CheckBox();
-        enabledChk.setSelected(enabled);
-        enabledChk.getStyleClass().add("af-checkbox");
-        HBox enabledBox = new HBox(enabledChk);
-        enabledBox.setPrefWidth(70);
-        enabledBox.setAlignment(Pos.CENTER_LEFT);
-
-        Button btnEdit  = new Button("edit");
-        Button btnReset = new Button("reset");
-        Button btnSave  = new Button("save");
-        btnEdit.getStyleClass().add("af-btn-small");
-        btnReset.getStyleClass().add("af-btn-small");
-        btnSave.getStyleClass().add("af-btn-small");
-        btnReset.setStyle("-fx-text-fill: #ffc107;");
-        btnSave.setStyle("-fx-text-fill: #4caf50;");
-        btnSave.setVisible(false); btnSave.setManaged(false);
-
-        final String defaultUrl   = url;
-        final String defaultDelay = delay;
-
-        btnEdit.setOnAction(e -> {
-            boolean editing = urlField.isVisible();
-            urlField.setVisible(!editing);    urlField.setManaged(!editing);
-            delayField.setVisible(!editing);  delayField.setManaged(!editing);
-            urlLabel.setVisible(editing);     urlLabel.setManaged(editing);
-            delayLabel.setVisible(editing);   delayLabel.setManaged(editing);
-            btnSave.setVisible(!editing);     btnSave.setManaged(!editing);
-            btnEdit.setText(editing ? "edit" : "cancel");
-        });
-
-        btnReset.setOnAction(e -> {
-            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                    "Reset \"" + name + "\" to defaults?", ButtonType.YES, ButtonType.NO);
-            confirm.setHeaderText(null);
-            confirm.showAndWait().ifPresent(btn -> {
-                if (btn == ButtonType.YES) {
-                    urlField.setText(defaultUrl);
-                    delayField.setText(defaultDelay);
-                    urlLabel.setText(defaultUrl);
-                    delayLabel.setText(defaultDelay + " ms");
-                    if (urlField.isVisible()) {
-                        urlField.setVisible(false);   urlField.setManaged(false);
-                        delayField.setVisible(false); delayField.setManaged(false);
-                        urlLabel.setVisible(true);    urlLabel.setManaged(true);
-                        delayLabel.setVisible(true);  delayLabel.setManaged(true);
-                        btnSave.setVisible(false);    btnSave.setManaged(false);
-                        btnEdit.setText("edit");
-                    }
-                }
-            });
-        });
-
-        btnSave.setOnAction(e -> {
-            if (!urlField.getText().isEmpty())   urlLabel.setText(urlField.getText());
-            if (!delayField.getText().isEmpty()) delayLabel.setText(delayField.getText() + " ms");
-            urlField.setVisible(false);   urlField.setManaged(false);
-            delayField.setVisible(false); delayField.setManaged(false);
-            urlLabel.setVisible(true);    urlLabel.setManaged(true);
-            delayLabel.setVisible(true);  delayLabel.setManaged(true);
-            btnSave.setVisible(false);    btnSave.setManaged(false);
-            btnEdit.setText("edit");
-        });
-
-        HBox actions = new HBox(4, btnEdit, btnReset, btnSave);
-        actions.setPrefWidth(130);
-        actions.setAlignment(Pos.CENTER_LEFT);
-
-        StackPane urlStack = new StackPane(urlLabel, urlField);
-        urlStack.setPrefWidth(280); urlStack.setAlignment(Pos.CENTER_LEFT);
-
-        StackPane delayStack = new StackPane(delayLabel, delayField);
-        delayStack.setPrefWidth(90); delayStack.setAlignment(Pos.CENTER_LEFT);
-
-        row.getChildren().addAll(nameLabel, methodLabel, urlStack, delayStack, enabledBox, actions);
-        return row;
+        cfg.setEnabled(true);
+        enabledCheck.setSelected(true);
+        AppConfig.getInstance().save();
+        setStatus("✓  Custom API saved and enabled.", "#4caf50");
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────
+    /**
+     * Testa a conexão com o endpoint usando um username de teste "test".
+     * Não interpreta o resultado — apenas verifica se o servidor responde.
+     */
+    private void onTestConnection() {
+        saveSettings();
+        var cfg = AppConfig.getInstance().getSettings().getCustomApi();
 
-    private void setRowStyle(HBox row, boolean hover) {
-        row.setStyle("-fx-background-color: " + (hover ? "#252525" : "#1e1e1e") +
-                "; -fx-border-color: transparent transparent #2a2a2a transparent; -fx-border-width: 1px;");
+        if (cfg.getEndpointUrl().isBlank()) {
+            setStatus("⚠  Set an endpoint URL before testing.", "#ffc107");
+            return;
+        }
+
+        setStatus("⏳  Testing connection...", "#4a90d9");
+
+        // Executa em thread separada para não bloquear a UI
+        Thread t = new Thread(() -> {
+            try {
+                java.net.URL url = new java.net.URL(cfg.getEndpointUrl() + "test");
+                java.net.HttpURLConnection conn =
+                        (java.net.HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(8000);
+                conn.setRequestProperty("User-Agent", "AliasForge/1.0");
+
+                // Aplica headers customizados se configurados
+                applyHeadersForTest(conn, cfg.getCustomHeaders());
+
+                int code = conn.getResponseCode();
+                conn.disconnect();
+
+                final String msg = "✓  Server responded with HTTP " + code +
+                        ". Connection OK — now configure detection rules.";
+                javafx.application.Platform.runLater(() -> setStatus(msg, "#4caf50"));
+
+            } catch (java.net.UnknownHostException e) {
+                javafx.application.Platform.runLater(() ->
+                        setStatus("✗  Could not reach host. Check the URL.", "#f44336"));
+            } catch (java.net.SocketTimeoutException e) {
+                javafx.application.Platform.runLater(() ->
+                        setStatus("✗  Connection timed out.", "#f44336"));
+            } catch (Exception e) {
+                javafx.application.Platform.runLater(() ->
+                        setStatus("✗  Error: " + e.getMessage(), "#f44336"));
+            }
+        }, "aliasforge-api-test");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void applyHeadersForTest(java.net.HttpURLConnection conn, String headersJson) {
+        if (headersJson == null || headersJson.isBlank()) return;
+        try {
+            com.google.gson.JsonObject obj =
+                    com.google.gson.JsonParser.parseString(headersJson.trim()).getAsJsonObject();
+            obj.entrySet().forEach(e ->
+                    conn.setRequestProperty(e.getKey(), e.getValue().getAsString()));
+        } catch (Exception ignored) {}
+    }
+
+    // ── Visibilidade das seções de detecção ────────────────────────────
+
+    private void updateModeVisibility() {
+        DetectionMode mode = getSelectedMode();
+        boolean showStatus  = mode == DetectionMode.STATUS_CODE  || mode == DetectionMode.BOTH;
+        boolean showScraping= mode == DetectionMode.BODY_SCRAPING|| mode == DetectionMode.BOTH;
+
+        statusCodeSection.setVisible(showStatus);
+        statusCodeSection.setManaged(showStatus);
+        bodyScrapingSection.setVisible(showScraping);
+        bodyScrapingSection.setManaged(showScraping);
+    }
+
+    private DetectionMode getSelectedMode() {
+        if (rbStatusCode.isSelected())   return DetectionMode.STATUS_CODE;
+        if (rbBodyScraping.isSelected()) return DetectionMode.BODY_SCRAPING;
+        return DetectionMode.BOTH;
+    }
+
+    // ── Load / Save ────────────────────────────────────────────────────
+
+    private void loadSettings() {
+        loading = true;
+        try {
+            var cfg = AppConfig.getInstance().getSettings().getCustomApi();
+
+            urlField.setText(cfg.getEndpointUrl());
+            delayField.setText(String.valueOf(cfg.getDelayMs()));
+            headersField.setText(cfg.getCustomHeaders() != null ? cfg.getCustomHeaders() : "");
+            enabledCheck.setSelected(cfg.isEnabled());
+
+            // Modo de detecção
+            switch (cfg.getDetectionMode()) {
+                case STATUS_CODE   -> rbStatusCode.setSelected(true);
+                case BODY_SCRAPING -> rbBodyScraping.setSelected(true);
+                default            -> rbBoth.setSelected(true);
+            }
+
+            // Status code
+            availableCodeField.setText(String.valueOf(cfg.getAvailableStatusCode()));
+            takenCodeField.setText(String.valueOf(cfg.getTakenStatusCode()));
+            rateLimitCodeField.setText(String.valueOf(cfg.getRateLimitStatusCode()));
+
+            // Body scraping
+            availableStringField.setText(cfg.getAvailableBodyString() != null
+                    ? cfg.getAvailableBodyString() : "");
+            takenStringField.setText(cfg.getTakenBodyString() != null
+                    ? cfg.getTakenBodyString() : "");
+            bodyLinesField.setText(String.valueOf(cfg.getBodyReadLines()));
+
+            // Atualiza visibilidade após carregar
+            updateModeVisibility();
+
+            // Mostra status se já estiver configurado e habilitado
+            if (cfg.isEnabled() && cfg.isConfigured()) {
+                setStatus("✓  Custom API is active.", "#4caf50");
+            } else if (cfg.isEnabled() && !cfg.isConfigured()) {
+                setStatus("⚠  Enabled but not fully configured.", "#ffc107");
+            }
+
+        } finally {
+            loading = false;
+        }
+    }
+
+    private void saveSettings() {
+        if (loading) return;
+
+        var cfg = AppConfig.getInstance().getSettings().getCustomApi();
+
+        cfg.setEndpointUrl(urlField.getText().trim());
+        cfg.setDelayMs(parseIntSafe(delayField.getText(), 1000));
+        cfg.setCustomHeaders(headersField.getText().trim());
+        cfg.setEnabled(enabledCheck.isSelected());
+        cfg.setDetectionMode(getSelectedMode());
+
+        // Status code
+        cfg.setAvailableStatusCode(parseIntSafe(availableCodeField.getText(), 404));
+        cfg.setTakenStatusCode(parseIntSafe(takenCodeField.getText(), 200));
+        cfg.setRateLimitStatusCode(parseIntSafe(rateLimitCodeField.getText(), 429));
+
+        // Body scraping
+        cfg.setAvailableBodyString(availableStringField.getText().trim());
+        cfg.setTakenBodyString(takenStringField.getText().trim());
+        cfg.setBodyReadLines(parseIntSafe(bodyLinesField.getText(), 80));
+
+        AppConfig.getInstance().save();
+    }
+
+    // ── Helpers de UI ──────────────────────────────────────────────────
+
+    private void setStatus(String text, String color) {
+        statusLabel.setText(text);
+        statusLabel.setStyle("-fx-text-fill: " + color + "; -fx-font-size: 11px;");
     }
 
     private VBox buildSection(String title) {
         VBox section = new VBox(10);
         section.setStyle(
-                "-fx-background-color: #232323; -fx-border-color: #333333; -fx-border-width: 1px;" +
-                        "-fx-border-radius: 4px; -fx-background-radius: 4px; -fx-padding: 12px 14px 14px 14px;");
+                "-fx-background-color: #232323; -fx-border-color: #333333; " +
+                        "-fx-border-width: 1px; -fx-border-radius: 4px; " +
+                        "-fx-background-radius: 4px; -fx-padding: 12px 14px 14px 14px;");
         Label titleLabel = new Label(title);
         titleLabel.setStyle("-fx-text-fill: #999999; -fx-font-size: 11px;");
         Separator sep = new Separator();
@@ -259,32 +522,80 @@ public class ApiSettingsView extends VBox {
         return section;
     }
 
-    private VBox buildInputGroup(String label, String placeholder) {
-        VBox box = new VBox(4);
-        Label lbl = new Label(label);
-        lbl.getStyleClass().add("af-label-muted");
+    /** Cria um VBox label + field usando um prompt de placeholder. */
+    private VBox buildLabeledField(String label, String placeholder) {
         TextField field = new TextField();
         field.setPromptText(placeholder);
         field.getStyleClass().add("af-input");
+        return buildLabeledFieldRaw(label, field);
+    }
+
+    private VBox buildLabeledFieldRaw(String label, TextField field) {
+        VBox box = new VBox(4);
+        Label lbl = new Label(label);
+        lbl.setStyle("-fx-text-fill: #777777; -fx-font-size: 11px;");
         box.getChildren().addAll(lbl, field);
         return box;
     }
 
-    private VBox buildComboGroup(String label, String[] options, String selected) {
-        VBox box = new VBox(4);
+    /** Cria um HBox "label + field" compacto para campos numéricos em linha. */
+    private HBox buildInlineField(String label, TextField field) {
+        VBox box = new VBox(3);
         Label lbl = new Label(label);
-        lbl.getStyleClass().add("af-label-muted");
-        ComboBox<String> combo = new ComboBox<>();
-        combo.getItems().addAll(options);
-        combo.setValue(selected);
-        combo.getStyleClass().add("af-combo");
-        box.getChildren().addAll(lbl, combo);
-        return box;
+        lbl.setStyle("-fx-text-fill: #777777; -fx-font-size: 10px;");
+        box.getChildren().addAll(lbl, field);
+        HBox wrapper = new HBox(box);
+        return wrapper;
+    }
+
+    private TextField buildSmallField(String defaultValue) {
+        TextField f = new TextField(defaultValue);
+        f.getStyleClass().add("af-input");
+        f.setPrefWidth(80);
+        return f;
+    }
+
+    private TextField buildWideField(String placeholder) {
+        TextField f = new TextField();
+        f.setPromptText(placeholder);
+        f.getStyleClass().add("af-input");
+        f.setPrefWidth(200);
+        return f;
+    }
+
+    private HBox buildReadOnlyApiRow(String name, String method,
+                                     String url, String delay, String statusText) {
+        HBox row = new HBox();
+        row.setPadding(new Insets(7, 8, 7, 8));
+        row.setAlignment(Pos.CENTER_LEFT);
+        row.setStyle("-fx-background-color: #1e1e1e; " +
+                "-fx-border-color: transparent transparent #2a2a2a transparent; -fx-border-width: 1px;");
+        row.setOnMouseEntered(e -> row.setStyle(
+                "-fx-background-color: #252525; " +
+                        "-fx-border-color: transparent transparent #2a2a2a transparent; -fx-border-width: 1px;"));
+        row.setOnMouseExited(e -> row.setStyle(
+                "-fx-background-color: #1e1e1e; " +
+                        "-fx-border-color: transparent transparent #2a2a2a transparent; -fx-border-width: 1px;"));
+
+        String statusColor = switch (statusText) {
+            case "active"    -> "#4caf50";
+            case "web check" -> "#4a90d9";
+            default          -> "#888888";
+        };
+
+        row.getChildren().addAll(
+                buildColLabel(name,       150, "#cccccc"),
+                buildColLabel(method,     80,  "#4a90d9"),
+                buildColLabel(url,        280, "#777777"),
+                buildColLabel(delay,      90,  "#aaaaaa"),
+                buildColLabel(statusText, 80,  statusColor)
+        );
+        return row;
     }
 
     private Label buildColHeader(String text, double width) {
         Label lbl = new Label(text);
-        lbl.setStyle("-fx-text-fill: #666666; -fx-font-size: 11px;");
+        lbl.setStyle("-fx-text-fill: #555555; -fx-font-size: 11px;");
         lbl.setPrefWidth(width);
         return lbl;
     }
@@ -297,10 +608,11 @@ public class ApiSettingsView extends VBox {
         return lbl;
     }
 
-    private void showInfo(String title, String message) {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION, message, ButtonType.OK);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.showAndWait();
+    private int parseIntSafe(String text, int defaultValue) {
+        try {
+            return Integer.parseInt(text.trim());
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 }

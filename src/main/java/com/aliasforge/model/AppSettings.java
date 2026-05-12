@@ -43,12 +43,14 @@ public class AppSettings {
     private String  lastManualPlatform  = "minecraft";
 
     // ── Sidebar — seções (ordem e estado aberto/fechado) ───────────────
-    // Ordem: lista de nomes das seções na ordem desejada pelo usuário
     private String[] sidebarSectionOrder    = {"generation", "filters", "characters"};
-    // Estado: true = aberto, false = fechado
     private boolean  sectionGenerationOpen  = true;
     private boolean  sectionFiltersOpen     = true;
     private boolean  sectionCharactersOpen  = true;
+
+    // ── Custom API ─────────────────────────────────────────────────────
+    // Gson instancia automaticamente com defaults se ausente no JSON salvo
+    private CustomApiSettings customApi = new CustomApiSettings();
 
     public AppSettings() {}
 
@@ -148,10 +150,6 @@ public class AppSettings {
     public boolean isSectionCharactersOpen()          { return sectionCharactersOpen; }
     public void    setSectionCharactersOpen(boolean v){ this.sectionCharactersOpen = v; }
 
-    /**
-     * Retorna o estado aberto/fechado de uma seção pelo nome.
-     * Usado pelo SidebarPanel para carregar o estado salvo.
-     */
     public boolean isSectionOpen(String name) {
         return switch (name) {
             case "generation"  -> sectionGenerationOpen;
@@ -161,9 +159,6 @@ public class AppSettings {
         };
     }
 
-    /**
-     * Salva o estado aberto/fechado de uma seção pelo nome.
-     */
     public void setSectionOpen(String name, boolean open) {
         switch (name) {
             case "generation"  -> sectionGenerationOpen  = open;
@@ -171,4 +166,14 @@ public class AppSettings {
             case "characters"  -> sectionCharactersOpen  = open;
         }
     }
+
+    // ── Custom API ─────────────────────────────────────────────────────
+
+    public CustomApiSettings getCustomApi() {
+        // Garante que nunca retorna null (pode acontecer ao deserializar JSON antigo)
+        if (customApi == null) customApi = new CustomApiSettings();
+        return customApi;
+    }
+
+    public void setCustomApi(CustomApiSettings v) { this.customApi = v; }
 }
