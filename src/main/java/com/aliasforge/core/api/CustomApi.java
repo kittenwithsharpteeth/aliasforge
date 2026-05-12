@@ -90,7 +90,7 @@ public class CustomApi extends AbstractPlatformApi {
 
         long start = System.currentTimeMillis();
         try {
-            HttpURLConnection conn = openConnection(url);
+            HttpURLConnection conn = openConnection(url, cfg.getTimeoutMs());
             applyCustomHeaders(conn, cfg.getCustomHeaders());
 
             int    code = conn.getResponseCode();

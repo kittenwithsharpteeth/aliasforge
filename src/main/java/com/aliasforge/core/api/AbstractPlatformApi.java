@@ -57,8 +57,23 @@ public abstract class AbstractPlatformApi implements PlatformApi {
     protected abstract CheckResult interpretResponse(int httpCode, long ms);
 
     protected HttpURLConnection openConnection(String endpoint) throws Exception {
-        int configTimeout = AppConfig.getInstance().getSettings().getRequestTimeoutMs();
-        int timeout = Math.max(configTimeout, MIN_TIMEOUT_MS);
+        return openConnection(endpoint, null);
+    }
+
+    /**
+     * Abre uma conexão HTTP usando o timeout global por padrão, mas permite
+     * que uma plataforma forneça um timeout específico quando necessário.
+     *
+     * @param endpoint URL final da requisição
+     * @param timeoutOverrideMs timeout opcional em milissegundos; null ou valores
+     *                          não positivos usam o timeout global do app
+     */
+    protected HttpURLConnection openConnection(String endpoint, Integer timeoutOverrideMs) throws Exception {
+        int globalTimeout = AppConfig.getInstance().getSettings().getRequestTimeoutMs();
+        int requestedTimeout = timeoutOverrideMs != null && timeoutOverrideMs > 0
+                ? timeoutOverrideMs
+                : globalTimeout;
+        int timeout = Math.max(requestedTimeout, MIN_TIMEOUT_MS);
 
         URL url = new URL(endpoint);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
