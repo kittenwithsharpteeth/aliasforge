@@ -14,9 +14,6 @@ import javafx.scene.layout.*;
 
 /**
  * MainWindow — monta a janela e conecta AppState à UI via listeners.
- *
- * Todo o Platform.runLater está aqui — na camada de UI — onde faz sentido.
- * O AppController e AppState não sabem nada de JavaFX.
  */
 public class MainWindow extends BorderPane {
 
@@ -136,7 +133,6 @@ public class MainWindow extends BorderPane {
     // ── Ações dos botões (UI → Controller) ────────────────────────────
 
     private void wireActions() {
-        // Play — trata StartResult para exibir motivo se rejeitado
         toolbarPanel.getBtnPlay().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
@@ -150,7 +146,6 @@ public class MainWindow extends BorderPane {
             }
         });
 
-        // Pause / Resume
         toolbarPanel.getBtnPause().setOnAction(e -> {
             if (controller.isPaused()) {
                 controller.resume();
@@ -159,34 +154,25 @@ public class MainWindow extends BorderPane {
             }
         });
 
-        // Stop
         toolbarPanel.getBtnStop().setOnAction(e -> controller.stop());
 
-        // Filter + Search → ResultsPanel
         toolbarPanel.setOnFilterChanged((filter, search) ->
                 resultsPanel.applyFilter(filter, search));
     }
 
-    // ── Estado (AppState → UI) — tudo com Platform.runLater ───────────
+    // ── Estado (AppState → UI) ─────────────────────────────────────────
 
-    /**
-     * Registra os listeners no AppState.
-     * Todos os updates de UI são feitos via Platform.runLater — centralizado aqui.
-     * O AppState não sabe nada de JavaFX.
-     */
     private void wireState() {
-        // Estado do checker → toolbar e status
         state.addOnRunningChanged(() -> Platform.runLater(() -> {
             boolean running = state.isRunning();
             boolean paused  = state.isPaused();
             toolbarPanel.setRunningState(running, paused);
         }));
 
-        // Stats → status bar e progress
         state.addOnStatsChanged(stats -> Platform.runLater(() -> {
             statusBarPanel.updateStats(
                     stats.available(), stats.taken(),
-                    stats.rateLimit(), stats.error(),
+                    stats.rateLimit(), stats.inconclusive(), stats.error(),
                     stats.currentlyChecking()
             );
             int total = stats.checked() + stats.remaining();
@@ -197,7 +183,6 @@ public class MainWindow extends BorderPane {
             }
         }));
 
-        // Completed → reseta toolbar
         state.addOnCompleted(() -> Platform.runLater(() ->
                 toolbarPanel.setRunningState(false, false)));
     }

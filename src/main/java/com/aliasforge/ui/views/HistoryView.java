@@ -54,7 +54,7 @@ public class HistoryView extends VBox {
         Label filterLbl = new Label("filter");
         filterLbl.getStyleClass().add("af-label-muted");
         filterCombo = new ComboBox<>();
-        filterCombo.getItems().addAll("all", "available", "taken", "rate limit", "error");
+        filterCombo.getItems().addAll("all", "available", "taken", "rate limit", "inconclusive", "error");
         filterCombo.setValue("all");
         filterCombo.getStyleClass().add("af-combo");
         filterCombo.setPrefWidth(110);
@@ -184,7 +184,7 @@ public class HistoryView extends VBox {
         totalLabel     = new Label("total: 0");
         availableLabel = new Label("available: 0");
         takenLabel     = new Label("taken: 0");
-        errorLabel     = new Label("error / rate limit: 0");
+        errorLabel     = new Label("issues: 0");
 
         totalLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 12px;");
         availableLabel.setStyle("-fx-text-fill: #4caf50; -fx-font-size: 12px;");
@@ -227,19 +227,16 @@ public class HistoryView extends VBox {
         long taken  = rows.stream().filter(r -> "taken".equals(r.statusProperty().get())).count();
         long errors = rows.stream().filter(r ->
                 "error".equals(r.statusProperty().get()) ||
+                        "inconclusive".equals(r.statusProperty().get()) ||
                         "rate limit".equals(r.statusProperty().get())).count();
         totalLabel.setText("total: " + rows.size());
         availableLabel.setText("available: " + avail);
         takenLabel.setText("taken: " + taken);
-        errorLabel.setText("error / rate limit: " + errors);
+        errorLabel.setText("issues: " + errors);
     }
 
-    // ── Export CSV — delega ao ExportService ───────────────────────────
+    // ── Export CSV ─────────────────────────────────────────────────────
 
-    /**
-     * Antes: lógica embutida com BufferedWriter, colunas diferentes das do ResultsPanel.
-     * Depois: delega ao ExportService — UI só cuida do FileChooser e do alerta.
-     */
     private void exportCsv() {
         ExportService export = controller.getExportService();
 
@@ -289,7 +286,6 @@ public class HistoryView extends VBox {
             platformEnum = r.getPlatform();
         }
 
-        /** Retorna o UsernameResult original para o ExportService. */
         public UsernameResult toResult() {
             return originalResult;
         }
@@ -314,11 +310,12 @@ public class HistoryView extends VBox {
             if (empty || status == null) { setText(null); setStyle(""); return; }
             setText(status);
             String color = switch (status) {
-                case "available"  -> "#4caf50";
-                case "taken"      -> "#f44336";
-                case "rate limit" -> "#ffc107";
-                case "error"      -> "#757575";
-                default           -> "#cccccc";
+                case "available"    -> "#4caf50";
+                case "taken"        -> "#f44336";
+                case "rate limit"   -> "#ffc107";
+                case "inconclusive" -> "#9c27b0";
+                case "error"        -> "#757575";
+                default             -> "#cccccc";
             };
             setStyle("-fx-text-fill: " + color + "; -fx-font-weight: bold;");
         }

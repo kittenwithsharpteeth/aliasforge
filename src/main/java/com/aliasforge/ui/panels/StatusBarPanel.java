@@ -11,6 +11,7 @@ public class StatusBarPanel extends HBox {
     private Label availableLabel;
     private Label takenLabel;
     private Label rateLimitLabel;
+    private Label inconclusiveLabel;
     private Label errorLabel;
     private Label checkingLabel;
     private ProgressBar progressBar;
@@ -24,11 +25,12 @@ public class StatusBarPanel extends HBox {
     }
 
     private void buildUI() {
-        availableLabel = buildStatLabel("available: 0",  "#4caf50");
-        takenLabel     = buildStatLabel("taken: 0",      "#f44336");
-        rateLimitLabel = buildStatLabel("rate limit: 0", "#ffc107");
-        errorLabel     = buildStatLabel("error: 0",      "#9e9e9e");
-        checkingLabel  = buildStatLabel("currently checking: 0", "#2196f3");
+        availableLabel    = buildStatLabel("available: 0",     "#4caf50");
+        takenLabel        = buildStatLabel("taken: 0",         "#f44336");
+        rateLimitLabel    = buildStatLabel("rate limit: 0",    "#ffc107");
+        inconclusiveLabel = buildStatLabel("inconclusive: 0",  "#9c27b0");
+        errorLabel        = buildStatLabel("error: 0",         "#9e9e9e");
+        checkingLabel     = buildStatLabel("currently checking: 0", "#2196f3");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -39,7 +41,7 @@ public class StatusBarPanel extends HBox {
 
         getChildren().addAll(
                 availableLabel, takenLabel, rateLimitLabel,
-                errorLabel, checkingLabel, spacer, progressBar
+                inconclusiveLabel, errorLabel, checkingLabel, spacer, progressBar
         );
     }
 
@@ -49,10 +51,11 @@ public class StatusBarPanel extends HBox {
         return lbl;
     }
 
-    public void updateStats(int available, int taken, int rateLimit, int error, int checking) {
+    public void updateStats(int available, int taken, int rateLimit, int inconclusive, int error, int checking) {
         availableLabel.setText("available: " + available);
         takenLabel.setText("taken: " + taken);
         rateLimitLabel.setText("rate limit: " + rateLimit);
+        inconclusiveLabel.setText("inconclusive: " + inconclusive);
         errorLabel.setText("error: " + error);
         checkingLabel.setText("currently checking: " + checking);
     }

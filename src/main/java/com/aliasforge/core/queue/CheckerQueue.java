@@ -37,13 +37,14 @@ public class CheckerQueue {
     // Fix 1: garante que o callback onCompleted dispara apenas uma vez por ciclo
     private final AtomicBoolean completionSignaled = new AtomicBoolean(false);
 
-    private final AtomicInteger totalChecked    = new AtomicInteger(0);
-    private final AtomicInteger totalAvailable  = new AtomicInteger(0);
-    private final AtomicInteger totalTaken      = new AtomicInteger(0);
-    private final AtomicInteger totalRateLimit  = new AtomicInteger(0);
-    private final AtomicInteger totalError      = new AtomicInteger(0);
-    private final AtomicInteger currentChecking = new AtomicInteger(0);
-    private final AtomicInteger activeWorkers   = new AtomicInteger(0);
+    private final AtomicInteger totalChecked       = new AtomicInteger(0);
+    private final AtomicInteger totalAvailable     = new AtomicInteger(0);
+    private final AtomicInteger totalTaken         = new AtomicInteger(0);
+    private final AtomicInteger totalRateLimit     = new AtomicInteger(0);
+    private final AtomicInteger totalInconclusive  = new AtomicInteger(0);
+    private final AtomicInteger totalError         = new AtomicInteger(0);
+    private final AtomicInteger currentChecking    = new AtomicInteger(0);
+    private final AtomicInteger activeWorkers      = new AtomicInteger(0);
 
     private final BlockingQueue<CheckTask> taskQueue = new LinkedBlockingQueue<>();
     private ExecutorService  executor;
@@ -78,7 +79,6 @@ public class CheckerQueue {
         rateLimitHandler = new RateLimitHandler(
                 retryTask -> {
                     if (!stopped.get()) {
-                        // Fix 2: reativa running ao injetar retry
                         running.set(true);
                         completionSignaled.set(false);
                         taskQueue.add(retryTask);
@@ -112,13 +112,11 @@ public class CheckerQueue {
     public void addManualTask(String username, Platform platform) {
         if (stopped.get()) return;
 
-        // Fix 2: reativa running explicitamente quando chegam novas tarefas
         running.set(true);
         completionSignaled.set(false);
 
         taskQueue.add(new CheckTask(username, platform, CheckTask.Origin.MANUAL));
 
-        // Se executor não existe ou foi encerrado, cria um novo worker leve
         if (executor == null || executor.isShutdown()) {
             executor = Executors.newFixedThreadPool(1, r -> {
                 Thread t = new Thread(r, "aliasforge-manual");
@@ -162,8 +160,6 @@ public class CheckerQueue {
     private void workerLoop() {
         activeWorkers.incrementAndGet();
 
-        // Fix 3: verifica disponibilidade da plataforma UMA vez por instância de worker,
-        // não a cada username. Se a plataforma não está disponível, descarta todas as tasks.
         PlatformApi api          = null;
         Platform    lastPlatform = null;
         boolean     platformAvailable = true;
@@ -171,7 +167,6 @@ public class CheckerQueue {
 
         try {
             while (!stopped.get()) {
-                // Pausa
                 while (paused.get() && !stopped.get()) {
                     synchronized (paused) {
                         try { paused.wait(200); }
@@ -186,13 +181,10 @@ public class CheckerQueue {
                 CheckTask task = taskQueue.poll(500, TimeUnit.MILLISECONDS);
 
                 if (task == null) {
-                    // Fix 1: verifica se todos os workers estão ociosos e
-                    // não há retries pendentes antes de sinalizar conclusão
                     if (running.get() &&
                             taskQueue.isEmpty() &&
                             rateLimitHandler != null &&
                             !rateLimitHandler.hasPendingRetries() &&
-                            // Usa compareAndSet para garantir disparo único
                             completionSignaled.compareAndSet(false, true)) {
                         running.set(false);
                         LOGGER.info("Checker queue empty — signaling completion.");
@@ -201,7 +193,6 @@ public class CheckerQueue {
                     continue;
                 }
 
-                // Fix 3: recria API e reavalia disponibilidade apenas quando a plataforma muda
                 if (api == null || task.getPlatform() != lastPlatform) {
                     api = ApiFactory.create(task.getPlatform());
                     lastPlatform = task.getPlatform();
@@ -212,7 +203,6 @@ public class CheckerQueue {
                     }
                 }
 
-                // Plataforma indisponível — descarta a task diretamente sem fazer request
                 if (!platformAvailable) {
                     totalError.incrementAndGet();
                     totalChecked.incrementAndGet();
@@ -242,9 +232,10 @@ public class CheckerQueue {
                     if (task.getRetryCount() > 0) totalRateLimit.decrementAndGet();
                     totalChecked.incrementAndGet();
                     switch (result.status()) {
-                        case AVAILABLE -> totalAvailable.incrementAndGet();
-                        case TAKEN     -> totalTaken.incrementAndGet();
-                        default        -> totalError.incrementAndGet();
+                        case AVAILABLE    -> totalAvailable.incrementAndGet();
+                        case TAKEN        -> totalTaken.incrementAndGet();
+                        case INCONCLUSIVE -> totalInconclusive.incrementAndGet();
+                        default           -> totalError.incrementAndGet();
                     }
                     publishResult(new UsernameResult(
                             task.getUsername(), task.getPlatform(),
@@ -282,7 +273,8 @@ public class CheckerQueue {
             int pending = rateLimitHandler != null ? rateLimitHandler.getPendingRetryCount() : 0;
             CheckerStats stats = new CheckerStats(
                     totalChecked.get(), totalAvailable.get(), totalTaken.get(),
-                    totalRateLimit.get(), totalError.get(), currentChecking.get(),
+                    totalRateLimit.get(), totalInconclusive.get(), totalError.get(),
+                    currentChecking.get(),
                     taskQueue.size() + pending
             );
             javafx.application.Platform.runLater(() -> onStatsUpdate.accept(stats));
@@ -292,7 +284,8 @@ public class CheckerQueue {
     private void reset() {
         taskQueue.clear();
         totalChecked.set(0); totalAvailable.set(0); totalTaken.set(0);
-        totalRateLimit.set(0); totalError.set(0); currentChecking.set(0);
+        totalRateLimit.set(0); totalInconclusive.set(0); totalError.set(0);
+        currentChecking.set(0);
         activeWorkers.set(0);
         completionSignaled.set(false);
     }
@@ -303,5 +296,6 @@ public class CheckerQueue {
 
     public record CheckerStats(
             int checked, int available, int taken,
-            int rateLimit, int error, int currentlyChecking, int remaining) {}
+            int rateLimit, int inconclusive, int error,
+            int currentlyChecking, int remaining) {}
 }

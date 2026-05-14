@@ -251,12 +251,8 @@ public class FavoritesView extends VBox {
         takenLabel.setText("taken: " + taken);
     }
 
-    // ── Export CSV — delega ao ExportService ───────────────────────────
+    // ── Export CSV ─────────────────────────────────────────────────────
 
-    /**
-     * Antes: lógica embutida sem escape CSV correto.
-     * Depois: delega ao ExportService — UI só cuida do FileChooser e do alerta.
-     */
     private void exportCsv() {
         ExportService export = controller.getExportService();
 
@@ -302,7 +298,6 @@ public class FavoritesView extends VBox {
             platformEnum = r.getPlatform();
         }
 
-        /** Retorna o UsernameResult original para o ExportService. */
         public UsernameResult toResult() {
             return originalResult;
         }
@@ -323,10 +318,11 @@ public class FavoritesView extends VBox {
             if (empty || status == null) { setText(null); setStyle(""); return; }
             setText(status);
             String color = switch (status) {
-                case "available" -> "#4caf50";
-                case "taken"     -> "#f44336";
-                case "error"     -> "#757575";
-                default          -> "#cccccc";
+                case "available"    -> "#4caf50";
+                case "taken"        -> "#f44336";
+                case "inconclusive" -> "#9c27b0";
+                case "error"        -> "#757575";
+                default             -> "#cccccc";
             };
             setStyle("-fx-text-fill: " + color + "; -fx-font-weight: bold;");
         }

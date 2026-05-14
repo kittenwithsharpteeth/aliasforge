@@ -23,7 +23,6 @@ import java.util.stream.Collectors;
 
 /**
  * ResultsPanel — observa AppState via listener.
- * Platform.runLater centralizado aqui — AppState não sabe de JavaFX.
  */
 public class ResultsPanel extends VBox {
 
@@ -110,7 +109,6 @@ public class ResultsPanel extends VBox {
 
         btnExport.setOnAction(e -> exportCsv());
 
-        // Clear — delega ao controller que atualiza o AppState
         btnClear.setOnAction(e -> controller.clearResults());
 
         Region spacer = new Region();
@@ -170,22 +168,16 @@ public class ResultsPanel extends VBox {
 
     // ── Bind ao AppState ───────────────────────────────────────────────
 
-    /**
-     * Observa o AppState via listener.
-     * O Platform.runLater garante que updates de UI rodem na thread correta.
-     */
     private void bindState() {
         state.addOnResultsChanged(() -> javafx.application.Platform.runLater(() -> {
             List<UsernameResult> current = state.getResults();
 
-            // Se o estado ficou vazio (clear foi chamado), limpa a tabela
             if (current.isEmpty()) {
                 allRows.clear();
                 table.getItems().clear();
                 return;
             }
 
-            // Sincroniza cada resultado
             for (UsernameResult result : current) {
                 updateOrAdd(result);
             }
@@ -237,15 +229,8 @@ public class ResultsPanel extends VBox {
         }
     }
 
-    // ── Export CSV — delega ao ExportService ───────────────────────────
+    // ── Export CSV ─────────────────────────────────────────────────────
 
-    /**
-     * Antes: ~20 linhas com FileWriter, try-catch e formatação embutida.
-     * Depois: delega ao ExportService — UI só cuida do FileChooser e do alerta.
-     *
-     * Nota: ResultRow mantém referência ao UsernameResult original via
-     * toUsernameResult() para evitar perda de dados na conversão.
-     */
     private void exportCsv() {
         ExportService export = controller.getExportService();
 
@@ -292,7 +277,7 @@ public class ResultsPanel extends VBox {
         private final StringProperty  time      = new SimpleStringProperty();
         private final StringProperty  origin    = new SimpleStringProperty();
         private Platform     platformEnum;
-        private UsernameResult originalResult; // mantida para toUsernameResult()
+        private UsernameResult originalResult;
 
         public ResultRow(UsernameResult r) { update(r); }
 
@@ -307,10 +292,6 @@ public class ResultsPanel extends VBox {
             this.platformEnum = r.getPlatform();
         }
 
-        /**
-         * Retorna o UsernameResult original para o ExportService.
-         * Garante que todos os campos (errorDetail, checkedAt, etc.) sejam preservados.
-         */
         public UsernameResult toUsernameResult() {
             return originalResult;
         }
@@ -335,12 +316,13 @@ public class ResultsPanel extends VBox {
             if (empty || status == null) { setText(null); setStyle(""); return; }
             setText(status);
             String color = switch (status) {
-                case "available"  -> "#4caf50";
-                case "taken"      -> "#f44336";
-                case "rate limit" -> "#ffc107";
-                case "error"      -> "#757575";
-                case "checking"   -> "#2196f3";
-                default           -> "#cccccc";
+                case "available"    -> "#4caf50";
+                case "taken"        -> "#f44336";
+                case "rate limit"   -> "#ffc107";
+                case "inconclusive" -> "#9c27b0";
+                case "error"        -> "#757575";
+                case "checking"     -> "#2196f3";
+                default             -> "#cccccc";
             };
             setStyle("-fx-text-fill: " + color + "; -fx-font-weight: bold;");
         }

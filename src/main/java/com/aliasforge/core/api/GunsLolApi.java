@@ -11,25 +11,11 @@ import java.time.Duration;
 
 /**
  * guns.lol — verificação via GET no perfil público.
- *
- * Problema: guns.lol usa HTTP/2 e retorna 307 Temporary Redirect via
- * HTTP/2 PUSH_PROMISE, que o HttpClient com followRedirects(ALWAYS)
- * não segue automaticamente quando em modo HTTP/2.
- *
- * Fix: forçar HTTP_1_1 no HttpClient. Com HTTP/1.1, o 307 é um
- * redirect normal que followRedirects(ALWAYS) segue corretamente.
- *
- * Lógica após o redirect:
- * - 200 + perfil real  → taken
- * - 200 + erro inline  → available (scraping)
- * - 404               → available
- * - 429               → rate limit
  */
 public class GunsLolApi extends AbstractPlatformApi {
 
     private static final String ENDPOINT = "https://guns.lol/";
 
-    // HTTP_1_1 obrigatório — HTTP/2 quebra o follow redirect do 307
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
             .followRedirects(HttpClient.Redirect.ALWAYS)
@@ -86,8 +72,6 @@ public class GunsLolApi extends AbstractPlatformApi {
             if (code == 404) return CheckResult.available(ms);
             if (code == 429) return CheckResult.rateLimit();
 
-            // Ainda recebeu 307 mesmo com HTTP/1.1 — não deveria acontecer,
-            // mas como fallback seguro marca como error
             if (code == 307 || code == 301 || code == 302) {
                 LOGGER.warn("guns.lol: unexpected redirect {} for '{}' to {}",
                         code, username,
@@ -97,14 +81,13 @@ public class GunsLolApi extends AbstractPlatformApi {
 
             if (code != 200) return CheckResult.error("http " + code);
 
-            // 200 — verifica se é perfil real ou página de erro inline
             if (isNotFoundPage(body)) return CheckResult.available(ms);
             if (isRealProfile(body, username)) return CheckResult.taken(ms);
 
             // Ambíguo — conservador, não marca como available
             LOGGER.warn("guns.lol: ambiguous response for '{}' ({}chars body)",
                     username, body == null ? 0 : body.length());
-            return CheckResult.error("could not determine — try manual check");
+            return CheckResult.inconclusive("could not determine — try manual check", ms);
 
         } catch (java.net.http.HttpTimeoutException e) {
             return CheckResult.rateLimit();

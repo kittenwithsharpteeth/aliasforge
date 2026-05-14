@@ -149,7 +149,6 @@ public class SidebarPanel extends VBox {
         manualTable.setPrefHeight(150);
         btnClear.setOnAction(e -> {
             manualTable.getItems().clear();
-            // Limpa estilo de erro ao limpar a tabela
             manualInput.setStyle("");
             manualInput.setTooltip(null);
         });
@@ -159,12 +158,6 @@ public class SidebarPanel extends VBox {
         return box;
     }
 
-    /**
-     * Adiciona username para verificação manual com feedback imediato via ManualCheckResult.
-     *
-     * Antes: delegava void ao controller, erro só aparecia como "error" na tabela após request HTTP.
-     * Depois: usa ManualCheckResult para validação inline sem request HTTP.
-     */
     private void addManualUsername() {
         String username = manualInput.getText().trim();
         if (username.isEmpty()) return;
@@ -175,13 +168,11 @@ public class SidebarPanel extends VBox {
                 controller.addManualTask(username, platform);
 
         if (result.isInvalid()) {
-            // Feedback inline no campo — sem alert, melhor UX
             manualInput.setStyle("-fx-border-color: #f44336;");
             manualInput.setTooltip(new Tooltip(result.rejectionReason()));
             return;
         }
 
-        // Limpa estilo de erro se havia
         manualInput.setStyle("");
         manualInput.setTooltip(null);
 
@@ -221,7 +212,6 @@ public class SidebarPanel extends VBox {
 
         tv.getColumns().addAll(colCheck, colName, colStatus, colPlatform);
 
-        // Observa AppState via listener — sem ObservableList do controller
         state.addOnResultsChanged(() -> javafx.application.Platform.runLater(() -> {
             for (var r : state.getResults()) {
                 if (isManualEntry(r.getUsername(), r.getPlatform().displayName)) {
@@ -564,7 +554,6 @@ public class SidebarPanel extends VBox {
 
         manualPlatformCombo.selectPlatform(settings.getLastManualPlatform());
 
-        // Ordem e estado das seções
         String[] savedOrder = settings.getSidebarSectionOrder();
         List<String> validNames =
                 new ArrayList<>(Arrays.asList("generation", "filters", "characters"));
@@ -737,12 +726,13 @@ public class SidebarPanel extends VBox {
             if (empty || status == null || status.isEmpty()) { setText(null); setStyle(""); return; }
             setText(status);
             String color = switch (status) {
-                case "available"  -> "#4caf50";
-                case "taken"      -> "#f44336";
-                case "rate limit" -> "#ffc107";
-                case "error"      -> "#757575";
-                case "checking"   -> "#2196f3";
-                default           -> "#aaaaaa";
+                case "available"    -> "#4caf50";
+                case "taken"        -> "#f44336";
+                case "rate limit"   -> "#ffc107";
+                case "inconclusive" -> "#9c27b0";
+                case "error"        -> "#757575";
+                case "checking"     -> "#2196f3";
+                default             -> "#aaaaaa";
             };
             setStyle("-fx-text-fill: " + color + "; -fx-font-size: 11px;");
         }

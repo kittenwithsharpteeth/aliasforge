@@ -11,23 +11,6 @@ import java.time.Duration;
 
 /**
  * caliber.lol — verificação de username.
- *
- * O site é um SPA (React) com JS pesado — scraping do HTML não funciona
- * porque o conteúdo é renderizado no cliente.
- *
- * Estratégia principal: verificar a URL FINAL após todos os redirects.
- *
- * Comportamento observado:
- * - Usuário EXISTE   → URL final permanece https://caliber.lol/u/{username}
- *                      ou https://caliber.lol/{username}
- * - Usuário NÃO EXISTE → redireciona para home (https://caliber.lol/)
- *                        ou para /404 ou /not-found
- *
- * Também tenta o header X-User-Exists ou similar que alguns SPAs expõem.
- *
- * Fallback: status code 404 = available, qualquer redirect para / = available.
- *
- * HTTP_1_1 obrigatório pelo mesmo motivo que guns.lol (307 + HTTP/2).
  */
 public class CaliberApi extends AbstractPlatformApi {
 
@@ -88,13 +71,11 @@ public class CaliberApi extends AbstractPlatformApi {
             LOGGER.debug("caliber.lol username={} http={} time={}ms finalUrl={}",
                     username, code, ms, finalUri);
 
-            // 404 explícito = disponível
             if (code == 404) return CheckResult.available(ms);
             if (code == 429) return CheckResult.rateLimit();
             if (code != 200) return CheckResult.error("http " + code);
 
             // ── Estratégia 1: URL final após redirects ─────────────────
-            // Se foi redirecionado para a home ou /404, o usuário não existe
             String finalPath = finalUri.getPath().toLowerCase();
 
             if (wasRedirectedAway(finalPath, username)) {
@@ -103,14 +84,10 @@ public class CaliberApi extends AbstractPlatformApi {
                 return CheckResult.available(ms);
             }
 
-            // URL final ainda contém o username → usuário provavelmente existe
             if (finalPath.contains(username.toLowerCase())) {
-                // ── Estratégia 2: confirma com scraping leve do HTML ───
-                // mesmo sendo SPA, o SSR pode incluir og:title ou dados mínimos
                 if (body != null) {
                     String lower = body.toLowerCase();
 
-                    // Sinais negativos no HTML (página de erro SSR)
                     if (lower.contains("user not found") ||
                             lower.contains("page not found") ||
                             lower.contains("not-found") ||
@@ -118,21 +95,19 @@ public class CaliberApi extends AbstractPlatformApi {
                         return CheckResult.available(ms);
                     }
 
-                    // Sinais positivos (dados reais no HTML)
                     if (lower.contains("og:title") &&
                             lower.contains(username.toLowerCase())) {
                         return CheckResult.taken(ms);
                     }
                 }
 
-                // URL final correta + sem sinal negativo = provavelmente taken
                 return CheckResult.taken(ms);
             }
 
             // Inconclusivo
             LOGGER.warn("caliber.lol: could not determine for '{}' finalUrl='{}'",
                     username, finalUri);
-            return CheckResult.error("JS-heavy site — try manually at caliber.lol/u/" + username);
+            return CheckResult.inconclusive("JS-heavy site — try manually at caliber.lol/u/" + username, ms);
 
         } catch (java.net.http.HttpTimeoutException e) {
             return CheckResult.rateLimit();
@@ -142,28 +117,19 @@ public class CaliberApi extends AbstractPlatformApi {
         }
     }
 
-    /**
-     * Verifica se a URL final indica que o usuário não existe.
-     * Retorna true se foi redirecionado para fora da página do usuário.
-     */
     private boolean wasRedirectedAway(String finalPath, String username) {
         String lowerUser = username.toLowerCase();
 
-        // Redirecionou para home
         if (finalPath.equals("/") || finalPath.isEmpty()) return true;
 
-        // Redirecionou para página de erro explícita
         if (finalPath.contains("404") ||
                 finalPath.contains("not-found") ||
                 finalPath.contains("error")) return true;
 
-        // Redirecionou para login ou signup (usuário não existe)
         if (finalPath.contains("login") ||
                 finalPath.contains("signup") ||
                 finalPath.contains("register")) return true;
 
-        // URL final não contém o username de nenhuma forma
-        // (ex: /u/kitten → /u/kitten = ok, /u/kitten → / = redirected away)
         if (!finalPath.contains(lowerUser)) return true;
 
         return false;

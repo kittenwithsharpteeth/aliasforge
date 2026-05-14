@@ -15,7 +15,7 @@ public class UsernameResult {
     private final Platform      platform;
     private final CheckStatus   status;
     private final long          responseTimeMs;
-    private final String        errorDetail;   // detalhe do erro para os logs futuros
+    private final String        errorDetail;   // detalhe de erro ou de resultado inconclusivo para logs
     private final LocalDateTime checkedAt;
     private final boolean       favorited;
 
@@ -68,6 +68,7 @@ public class UsernameResult {
      * Coluna "origin" na tabela:
      * - available / taken  → vazio
      * - rate limit         → "queue"
+     * - inconclusive       → "review"
      * - error              → "logs"
      * - checking / pending → vazio
      */

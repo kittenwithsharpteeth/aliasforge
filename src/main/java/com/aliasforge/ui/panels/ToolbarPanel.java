@@ -18,7 +18,6 @@ public class ToolbarPanel extends HBox {
     private ProgressBar      progressBar;
     private Label            progressLabel;
 
-    // Callback chamado quando filtro ou busca mudam
     private BiConsumer<String, String> onFilterChanged;
 
     public ToolbarPanel() {
@@ -52,7 +51,7 @@ public class ToolbarPanel extends HBox {
         Label filterLabel = new Label("filter");
         filterLabel.getStyleClass().add("af-label-muted");
         filterCombo = new ComboBox<>();
-        filterCombo.getItems().addAll("all", "available", "taken", "rate limit", "error", "checking");
+        filterCombo.getItems().addAll("all", "available", "taken", "rate limit", "inconclusive", "error", "checking");
         filterCombo.setValue("all");
         filterCombo.getStyleClass().add("af-combo");
         filterCombo.setPrefWidth(110);
@@ -95,7 +94,6 @@ public class ToolbarPanel extends HBox {
 
     // ── API pública ────────────────────────────────────────────────────
 
-    /** Registra callback chamado quando filtro ou busca mudam. */
     public void setOnFilterChanged(BiConsumer<String, String> cb) {
         this.onFilterChanged = cb;
     }

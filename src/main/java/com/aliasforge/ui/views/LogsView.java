@@ -24,6 +24,7 @@ public class LogsView extends VBox {
     private TableView<LogRow>     table;
     private Label                 totalLabel;
     private Label                 rateLimitLabel;
+    private Label                 inconclusiveLabel;
     private Label                 errorLabel;
     private ComboBox<String>      typeCombo;
     private TextField             searchField;
@@ -54,8 +55,8 @@ public class LogsView extends VBox {
         Label typeLbl = new Label("type");
         typeLbl.getStyleClass().add("af-label-muted");
         typeCombo = new ComboBox<>();
-        typeCombo.getItems().addAll("all errors", "error", "rate limit");
-        typeCombo.setValue("all errors");
+        typeCombo.getItems().addAll("all issues", "error", "inconclusive", "rate limit");
+        typeCombo.setValue("all issues");
         typeCombo.getStyleClass().add("af-combo");
         typeCombo.setPrefWidth(120);
         typeCombo.setOnAction(e -> applyFilter());
@@ -98,7 +99,7 @@ public class LogsView extends VBox {
         table = new TableView<>();
         table.getStyleClass().add("af-table");
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(new Label("no errors logged yet") {{
+        table.setPlaceholder(new Label("no issues logged yet") {{
             setStyle("-fx-text-fill: #555555; -fx-font-size: 13px;");
         }});
 
@@ -156,34 +157,28 @@ public class LogsView extends VBox {
         bar.setPadding(new Insets(5, 12, 5, 12));
         bar.setAlignment(Pos.CENTER_LEFT);
 
-        totalLabel      = new Label("total: 0");
-        rateLimitLabel  = new Label("rate limit: 0");
-        errorLabel      = new Label("error: 0");
+        totalLabel        = new Label("total: 0");
+        rateLimitLabel    = new Label("rate limit: 0");
+        inconclusiveLabel = new Label("inconclusive: 0");
+        errorLabel        = new Label("error: 0");
 
         totalLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 12px;");
         rateLimitLabel.setStyle("-fx-text-fill: #ffc107; -fx-font-size: 12px;");
+        inconclusiveLabel.setStyle("-fx-text-fill: #9c27b0; -fx-font-size: 12px;");
         errorLabel.setStyle("-fx-text-fill: #757575; -fx-font-size: 12px;");
 
-        Label hint = new Label("ⓘ hover over a row to see full error detail");
+        Label hint = new Label("ⓘ hover over a row to see full issue detail");
         hint.setStyle("-fx-text-fill: #555555; -fx-font-size: 11px;");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        bar.getChildren().addAll(totalLabel, rateLimitLabel, errorLabel, spacer, hint);
+        bar.getChildren().addAll(totalLabel, rateLimitLabel, inconclusiveLabel, errorLabel, spacer, hint);
         return bar;
     }
 
     // ── Bind ao AppState ───────────────────────────────────────────────
 
-    /**
-     * Antes: usava controller.getHistory() como ObservableList — acoplamento forte
-     * que expunha a lista interna do controller para a UI.
-     *
-     * Depois: usa AppState via listener, igual às outras views.
-     * Elimina o getHistory() do AppController que retornava ObservableList JavaFX,
-     * violando a separação UI/Core.
-     */
     private void bindData() {
         state.addOnHistoryChanged(() ->
                 javafx.application.Platform.runLater(this::applyFilter));
@@ -194,14 +189,15 @@ public class LogsView extends VBox {
         String type   = typeCombo.getValue();
         String search = searchField.getText().toLowerCase().trim();
 
-        // Filtra de state.getHistory() em vez de controller.getHistory()
         List<LogRow> filtered = state.getHistory().stream()
                 .filter(r -> r.getStatus() == CheckStatus.ERROR ||
+                        r.getStatus() == CheckStatus.INCONCLUSIVE ||
                         r.getStatus() == CheckStatus.RATE_LIMIT)
                 .filter(r -> {
-                    if ("error".equals(type))      return r.getStatus() == CheckStatus.ERROR;
-                    if ("rate limit".equals(type)) return r.getStatus() == CheckStatus.RATE_LIMIT;
-                    return true; // "all errors"
+                    if ("error".equals(type))        return r.getStatus() == CheckStatus.ERROR;
+                    if ("inconclusive".equals(type)) return r.getStatus() == CheckStatus.INCONCLUSIVE;
+                    if ("rate limit".equals(type))   return r.getStatus() == CheckStatus.RATE_LIMIT;
+                    return true; // "all issues"
                 })
                 .filter(r -> search.isEmpty() ||
                         r.getUsername().toLowerCase().contains(search) ||
@@ -216,21 +212,16 @@ public class LogsView extends VBox {
 
     private void updateStats(List<LogRow> rows) {
         long rl  = rows.stream().filter(r -> "rate limit".equals(r.typeProperty().get())).count();
+        long inc = rows.stream().filter(r -> "inconclusive".equals(r.typeProperty().get())).count();
         long err = rows.stream().filter(r -> "error".equals(r.typeProperty().get())).count();
         totalLabel.setText("total: " + rows.size());
         rateLimitLabel.setText("rate limit: " + rl);
+        inconclusiveLabel.setText("inconclusive: " + inc);
         errorLabel.setText("error: " + err);
     }
 
-    // ── Export CSV — delega ao ExportService ───────────────────────────
+    // ── Export CSV ─────────────────────────────────────────────────────
 
-    /**
-     * Antes: lógica manual de escape inline — "\"" + detail.replace("\"", "'") + "\""
-     * — propensa a bugs e diferente das outras views.
-     *
-     * Depois: delega ao ExportService que centraliza o escape CSV correto
-     * (campos com vírgulas entre aspas duplas, aspas duplicadas).
-     */
     private void exportCsv() {
         ExportService export = controller.getExportService();
 
@@ -243,7 +234,6 @@ public class LogsView extends VBox {
         File file = chooser.showSaveDialog(getScene() != null ? getScene().getWindow() : null);
         if (file == null) return;
 
-        // Passa os UsernameResult originais — o ExportService sabe formatar os logs
         ExportService.ExportResult result = export.exportLogs(
                 table.getItems().stream().map(LogRow::toResult).toList(),
                 file.toPath()
@@ -278,7 +268,6 @@ public class LogsView extends VBox {
             detail.set(r.getErrorDetail() != null ? r.getErrorDetail() : "");
         }
 
-        /** Retorna o UsernameResult original para o ExportService. */
         public UsernameResult toResult() {
             return originalResult;
         }
@@ -299,9 +288,10 @@ public class LogsView extends VBox {
             if (empty || type == null) { setText(null); setStyle(""); return; }
             setText(type);
             String color = switch (type) {
-                case "rate limit" -> "#ffc107";
-                case "error"      -> "#757575";
-                default           -> "#cccccc";
+                case "rate limit"   -> "#ffc107";
+                case "inconclusive" -> "#9c27b0";
+                case "error"        -> "#757575";
+                default             -> "#cccccc";
             };
             setStyle("-fx-text-fill: " + color + "; -fx-font-weight: bold;");
         }
@@ -316,7 +306,6 @@ public class LogsView extends VBox {
                 setStyle("-fx-text-fill: #555555;");
                 return;
             }
-            // Trunca detalhes longos na célula — tooltip mostra o completo
             String display = detail.length() > 80 ? detail.substring(0, 77) + "..." : detail;
             setText(display);
             setStyle("-fx-text-fill: #888888; -fx-font-size: 11px;");

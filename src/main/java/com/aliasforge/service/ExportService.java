@@ -15,20 +15,6 @@ import java.util.List;
 
 /**
  * Centraliza toda a lógica de exportação de dados.
- *
- * Problema identificado: lógica de exportação CSV estava copiada
- * (copy-paste) em 4 classes de UI diferentes:
- *   - ResultsPanel.exportCsv()
- *   - HistoryView.exportCsv()
- *   - FavoritesView.exportCsv()
- *   - LogsView.exportCsv()
- *
- * Cada uma com sua própria abertura de BufferedWriter, FileChooser,
- * tratamento de IOException e formato CSV ligeiramente diferente.
- * Um bug de encoding ou escape em uma não era corrigido nas outras.
- *
- * Depois: as views delegam para este serviço e lidam apenas com
- * FileChooser (que é UI pura) e com a exibição do resultado.
  */
 public class ExportService {
 
@@ -46,12 +32,8 @@ public class ExportService {
         return instance;
     }
 
-    // ── Exportação de results (aba principal) ──────────────────────────
+    // ── Exportação de results ──────────────────────────────────────────
 
-    /**
-     * Exporta os results da aba principal.
-     * Antes: embutido em ResultsPanel — acoplava UI a I/O.
-     */
     public ExportResult exportResults(List<UsernameResult> results, Path destination) {
         if (results.isEmpty()) return ExportResult.empty("No results to export.");
 
@@ -82,11 +64,6 @@ public class ExportService {
 
     // ── Exportação de histórico ────────────────────────────────────────
 
-    /**
-     * Exporta o histórico completo.
-     * Antes: embutido em HistoryView com colunas ligeiramente diferentes
-     * das do ResultsPanel (faltava "origin", tinha "checked_at" com nome diferente).
-     */
     public ExportResult exportHistory(List<UsernameResult> history, Path destination) {
         if (history.isEmpty()) return ExportResult.empty("No history to export.");
 
@@ -146,11 +123,7 @@ public class ExportService {
     // ── Exportação de logs ─────────────────────────────────────────────
 
     /**
-     * Exporta erros e rate limits (aba Logs).
-     *
-     * Antes: LogsView.exportCsv() escapava aspas com lógica manual inline:
-     *   "\"" + r.detailProperty().get().replace("\"", "'") + "\""
-     * — essa lógica agora está centralizada em csvCell() abaixo.
+     * Exporta erros, inconclusivos e rate limits (aba Logs).
      */
     public ExportResult exportLogs(List<UsernameResult> logs, Path destination) {
         if (logs.isEmpty()) return ExportResult.empty("No logs to export.");
@@ -181,10 +154,6 @@ public class ExportService {
 
     // ── Helpers de formatação ──────────────────────────────────────────
 
-    /**
-     * Gera um nome de arquivo sugerido com timestamp.
-     * Antes: cada view hardcodava "aliasforge_results.csv", "aliasforge_history.csv" etc.
-     */
     public String suggestFilename(ExportType type) {
         String ts = LocalDateTime.now().format(EXPORT_TS);
         return switch (type) {
@@ -195,13 +164,6 @@ public class ExportService {
         };
     }
 
-    /**
-     * Monta uma linha CSV com escape correto de campos que contenham
-     * vírgulas, aspas ou quebras de linha.
-     *
-     * Antes: cada view usava String.join(",", ...) sem escape algum —
-     * campos com vírgulas (ex: detalhes de erro) quebravam o CSV.
-     */
     private String row(String... fields) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < fields.length; i++) {
@@ -213,7 +175,6 @@ public class ExportService {
 
     private String csvCell(String value) {
         if (value == null || value.isEmpty()) return "";
-        // Precisa de aspas se contém vírgula, aspas ou quebra de linha
         if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
             return "\"" + value.replace("\"", "\"\"") + "\"";
         }
@@ -243,9 +204,8 @@ public class ExportService {
             return new ExportResult(false, false, null, 0, message);
         }
 
-        /** Mensagem pronta para exibir na UI. */
         public String userMessage() {
-            if (empty)   return errorMessage;
+            if (empty)    return errorMessage;
             if (!success) return "Export failed: " + errorMessage;
             return "Exported " + rowCount + " records to:\n" + destination;
         }

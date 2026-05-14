@@ -25,13 +25,20 @@ public interface PlatformApi {
 
     record CheckResult(CheckStatus status, long responseTimeMs, String errorDetail) {
 
-        public static CheckResult available(long ms)    { return new CheckResult(CheckStatus.AVAILABLE,   ms, null); }
-        public static CheckResult taken(long ms)        { return new CheckResult(CheckStatus.TAKEN,        ms, null); }
-        public static CheckResult rateLimit()           { return new CheckResult(CheckStatus.RATE_LIMIT,   0,  "rate limited"); }
-        public static CheckResult error(String detail)  { return new CheckResult(CheckStatus.ERROR,        0,  detail); }
-        public static CheckResult unavailable(String r) { return new CheckResult(CheckStatus.ERROR,        0,  "unavailable: " + r); }
+        public static CheckResult available(long ms)    { return new CheckResult(CheckStatus.AVAILABLE,     ms, null); }
+        public static CheckResult taken(long ms)        { return new CheckResult(CheckStatus.TAKEN,          ms, null); }
+        public static CheckResult rateLimit()           { return new CheckResult(CheckStatus.RATE_LIMIT,     0,  "rate limited"); }
+        public static CheckResult inconclusive(String detail) {
+            return new CheckResult(CheckStatus.INCONCLUSIVE, 0, detail);
+        }
+        public static CheckResult inconclusive(String detail, long ms) {
+            return new CheckResult(CheckStatus.INCONCLUSIVE, ms, detail);
+        }
+        public static CheckResult error(String detail)  { return new CheckResult(CheckStatus.ERROR,          0,  detail); }
+        public static CheckResult unavailable(String r) { return new CheckResult(CheckStatus.ERROR,          0,  "unavailable: " + r); }
 
-        public boolean isRateLimit() { return status == CheckStatus.RATE_LIMIT; }
-        public boolean isError()     { return status == CheckStatus.ERROR; }
+        public boolean isRateLimit()    { return status == CheckStatus.RATE_LIMIT; }
+        public boolean isInconclusive() { return status == CheckStatus.INCONCLUSIVE; }
+        public boolean isError()        { return status == CheckStatus.ERROR; }
     }
 }

@@ -1,6 +1,7 @@
 package com.aliasforge.core.api;
 
 import com.aliasforge.config.AppConfig;
+import com.aliasforge.model.CheckStatus;
 import com.aliasforge.model.CustomApiSettings;
 import com.aliasforge.model.CustomApiSettings.DetectionMode;
 import com.aliasforge.model.Platform;
@@ -66,14 +67,12 @@ public class CustomApi extends AbstractPlatformApi {
         CustomApiSettings cfg = AppConfig.getInstance().getSettings().getCustomApi();
         String base = cfg.getEndpointUrl();
         if (base == null || base.isBlank()) return "";
-        // Garante que a URL termina com "/" antes de adicionar o username
         if (!base.endsWith("/")) base = base + "/";
         return base + username;
     }
 
     @Override
     protected CheckResult interpretResponse(int httpCode, long ms) {
-        // Usado apenas no fallback do AbstractPlatformApi — a lógica real está em check()
         CustomApiSettings cfg = AppConfig.getInstance().getSettings().getCustomApi();
         return interpretStatusCode(cfg, httpCode, ms);
     }
@@ -125,7 +124,7 @@ public class CustomApi extends AbstractPlatformApi {
             CheckResult statusResult = interpretStatusCode(cfg, code, ms);
 
             // Se o status code foi conclusivo, retorna imediatamente
-            if (statusResult.status() != com.aliasforge.model.CheckStatus.ERROR) {
+            if (statusResult.status() != CheckStatus.INCONCLUSIVE) {
                 conn.disconnect();
                 return statusResult;
             }
@@ -138,10 +137,10 @@ public class CustomApi extends AbstractPlatformApi {
 
             CheckResult bodyResult = interpretBody(cfg, body, ms);
 
-            // Se o body também foi inconclusivo, retorna o erro original do status code
-            if (bodyResult.status() == com.aliasforge.model.CheckStatus.ERROR) {
-                return CheckResult.error(
-                        "inconclusive: http " + code + " and body did not match any configured string");
+            // Se o body também foi inconclusivo, mantém o resultado separado de erro técnico
+            if (bodyResult.status() == CheckStatus.INCONCLUSIVE) {
+                return CheckResult.inconclusive(
+                        "http " + code + " and body did not match any configured rule", ms);
             }
 
             return bodyResult;
@@ -165,16 +164,16 @@ public class CustomApi extends AbstractPlatformApi {
                 code == cfg.getRateLimitStatusCode())  return CheckResult.rateLimit();
 
         // Código não configurado — inconclusivo
-        return CheckResult.error("unexpected http " + code +
+        return CheckResult.inconclusive("unexpected http " + code +
                 " (configured: available=" + cfg.getAvailableStatusCode() +
-                ", taken=" + cfg.getTakenStatusCode() + ")");
+                ", taken=" + cfg.getTakenStatusCode() + ")", ms);
     }
 
     // ── Interpretação por body scraping ────────────────────────────────
 
     private CheckResult interpretBody(CustomApiSettings cfg, String body, long ms) {
         if (body == null || body.isEmpty()) {
-            return CheckResult.error("empty response body");
+            return CheckResult.inconclusive("empty response body", ms);
         }
 
         String lower            = body.toLowerCase();
@@ -197,7 +196,7 @@ public class CustomApi extends AbstractPlatformApi {
         }
 
         // Nenhum sinal encontrado
-        return CheckResult.error("body did not contain any configured detection string");
+        return CheckResult.inconclusive("body did not contain any configured detection string", ms);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────
